@@ -47,8 +47,12 @@ FORMS_DOCS = [
         "url": "https://www.esd.whs.mil/Portals/54/Documents/DD/forms/dd/dd1351-2.pdf",
     },
     {
+        # NOTE: the canonical armypubs.army.mil/pub/eforms/* URL pattern is
+        # blocked for non-browser clients (returns a 1226-byte HTML error page).
+        # This api.army.mil mirror is a Fort Bragg AFT-titled variant of DA-4856
+        # — same AcroForm structure, fine for schema extraction + fill demos.
         "filename": "da_4856_blank.pdf",
-        "url": "https://armypubs.army.mil/pub/eforms/DR_a/ARN20422_DA_FORM_4856_FINAL.pdf",
+        "url": "https://api.army.mil/e2/c/downloads/2026/01/08/894c5fa5/da-form-4856-aft-initial-identification-counseling.pdf",
     },
 ]
 
