@@ -1,5 +1,13 @@
 """System prompts. Constrained to retrieved-context-only — no hallucination on regs."""
 
+from datetime import date
+
+
+def _today() -> str:
+    """Today's date as ISO string. Used to anchor relative dates in prompts."""
+    return date.today().isoformat()
+
+
 SYSTEM_PROMPT = """You are Adjutant, an AI assistant for US Army administrative tasks. You help junior NCOs and soldiers navigate Army Regulations, the Joint Travel Regulations (JTR), and DA forms.
 
 HARD RULES (you will be tested on these):
@@ -29,17 +37,44 @@ REFUSAL_OUT_OF_CORPUS = (
     "I won't guess on regulation language."
 )
 
-FORM_EXTRACTION_PROMPT = """Given the user's natural-language request and the retrieved regulation context, extract the structured fields needed to populate a {form_id}.
+FORM_EXTRACTION_PROMPT = """You are extracting form fields for a US Army {form_id}. Read the user's natural-language request and output a single JSON object.
 
-Return ONLY valid JSON matching this schema:
+Today's date is {today}. Use this when the request mentions relative dates.
+
+OUTPUT FORMAT:
+Return ONLY a JSON object. No prose, no preamble, no markdown, no <form_data> tags.
+
+SCHEMA (use these EXACT field names):
 {schema}
 
-User request: {query}
+CRITICAL RULES:
+- Use ONLY field names from the schema above. Do not invent keys.
+- Dates: ISO format YYYY-MM-DD. Use today's year unless the request says otherwise.
+- Unknown fields: use JSON null (not the string "null", not "N/A", not "TBD").
+- Never invent SSNs, addresses, or phone numbers.
+- name field: family name only or "LAST, FIRST" — NEVER include rank words like "Sergeant".
+- rank field: pay grade like "E-5", "O-3" — separate from name.
+- unit field: home duty station ONLY (e.g., "Fort Bragg") — NEVER the leave destination.
+- leave_type: default "Ordinary". Use "Emergency" only if request explicitly says emergency/death/funeral/family emergency. Use "Convalescent" only if request mentions surgery/recovery/medical. Use "Terminal" only if request mentions ETS/separation.
+- days_requested: integer count, inclusive of start_date through end_date.
+- For DD-1351-2 (TDY): tdy_location is the destination city, state — NOT the home station. duty_station is home station.
 
-Retrieved context:
-{context}
+EXAMPLES:
 
-If a required field cannot be inferred, return it as null and list it under "missing_fields".
+Request: "I need ten days of leave starting June 3, going to Atlanta. Sergeant Chen, E-5, Fort Bragg."
+Output:
+{{"name": "Chen", "rank": "E-5", "unit": "Fort Bragg", "leave_type": "Ordinary", "start_date": "2026-06-03", "end_date": "2026-06-12", "days_requested": 10, "leave_address": "Atlanta", "ssn": null, "leave_phone": null, "emergency_contact": null}}
+
+Request: "I need emergency leave for my father's funeral, three days starting tomorrow. Specialist Jones, B Company."
+Output:
+{{"name": "Jones", "rank": "E-4", "unit": "B Company", "leave_type": "Emergency", "start_date": "{today}", "end_date": null, "days_requested": 3, "leave_address": null, "ssn": null, "leave_phone": null, "emergency_contact": null}}
+
+Request: "TDY to Fort Polk five days starting July 14, JRTC mission rehearsal. Sergeant Chen, home station Fort Bragg."
+Output:
+{{"name": "Chen", "rank": "E-5", "duty_station": "Fort Bragg", "purpose": "JRTC mission rehearsal", "tdy_location": "Fort Polk, LA", "depart_date": "2026-07-14", "return_date": "2026-07-18", "total_days": 5, "ssn": null, "lodging_per_day": null, "mie_per_day": null, "estimated_total": null}}
+
+USER REQUEST:
+{query}
 
 JSON:
 """

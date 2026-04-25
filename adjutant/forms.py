@@ -36,19 +36,30 @@ DD_1351_2 = {
     "title": "Travel Voucher (Sub-Voucher)",
     "regulation": "Joint Travel Regulations",
     "pdf_path": "forms/dd_1351_2_blank.pdf",
+    # Schema keys are the LLM-facing semantic names (what we ask the LLM to populate).
+    # The "pdf_field" entries are the actual AcroForm field names in the blank PDF —
+    # consumed by pdf_fill.py to write into the right blocks.
+    # PDF block mapping (DD-1351-2 NOV 2025 revision):
+    #   Block 2  = Name              (two[0])
+    #   Block 3  = Grade             (three[0])
+    #   Block 4  = SSN / DoD ID      (four_specify[0])
+    #   Block 6a-e = Home address    (sixA-E[0]) — we use sixA for home base
+    #   Block 11 = Organization/Station — i.e. soldier's HOME unit (eleven[0])
+    #   Block 15 = Itinerary table — DEP/ARR rows × city/reason/lodging columns
     "fields": {
-        "name": {"desc": "Traveler full name", "type": "string", "required": True},
-        "ssn": {"desc": "DoD ID / SSN last 4", "type": "string", "required": True},
-        "rank": {"desc": "Pay grade", "type": "string", "required": True},
-        "duty_station": {"desc": "Permanent duty station", "type": "string", "required": True},
-        "purpose": {"desc": "Purpose of TDY (e.g., training, conference)", "type": "string", "required": True},
-        "tdy_location": {"desc": "Destination city, state", "type": "string", "required": True},
-        "depart_date": {"desc": "Date of departure", "type": "date", "required": True},
-        "return_date": {"desc": "Date of return", "type": "date", "required": True},
-        "lodging_per_day": {"desc": "GSA lodging rate at destination (USD)", "type": "number", "required": True},
-        "mie_per_day": {"desc": "GSA M&IE rate at destination (USD)", "type": "number", "required": True},
-        "total_days": {"desc": "Number of TDY days", "type": "integer", "required": True},
-        "estimated_total": {"desc": "Estimated total reimbursement (USD)", "type": "number", "required": True},
+        "name":            {"desc": "Traveler last name only",                         "type": "string", "required": True,  "pdf_field": "two[0]"},
+        "rank":            {"desc": "Pay grade like E-5, O-3",                          "type": "string", "required": True,  "pdf_field": "three[0]"},
+        "ssn":             {"desc": "Last 4 of SSN or DoD ID",                          "type": "string", "required": False, "pdf_field": "four_specify[0]"},
+        "duty_station":    {"desc": "Home base / duty station street address",          "type": "string", "required": True,  "pdf_field": "sixA[0]"},
+        "unit":            {"desc": "Home unit name (Block 11 — Organization & Station)","type": "string", "required": True,  "pdf_field": "eleven[0]"},
+        "purpose":         {"desc": "Purpose of TDY (Block 15 line 2 reason for stop)", "type": "string", "required": True,  "pdf_field": "fifteen_reason_line2[0]"},
+        "tdy_location":    {"desc": "TDY destination city, state",                       "type": "string", "required": True,  "pdf_field": "fifteen_place_line1[0]"},
+        "depart_date":     {"desc": "Date of departure (YYYYMMDD)",                      "type": "date",   "required": True,  "pdf_field": "fifteen_dep_date_line1[0]"},
+        "return_date":     {"desc": "Date of return (YYYYMMDD)",                         "type": "date",   "required": True,  "pdf_field": "fifteen_arr_date_line2[0]"},
+        "total_days":      {"desc": "Total TDY days",                                    "type": "integer","required": True,  "pdf_field": None},
+        "lodging_per_day": {"desc": "GSA lodging rate ($/day)",                          "type": "number", "required": True,  "pdf_field": "fifteen_lodging_line2[0]"},
+        "mie_per_day":     {"desc": "GSA M&IE rate ($/day)",                             "type": "number", "required": True,  "pdf_field": None},
+        "estimated_total": {"desc": "Estimated total reimbursement (USD)",               "type": "number", "required": True,  "pdf_field": None},
     },
 }
 

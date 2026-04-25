@@ -89,11 +89,14 @@ def extract_form_data(query: str, chunks: list[dict], schema: dict) -> dict:
         indent=2,
     )
 
+    from adjutant.prompts import _today
+
     prompt = FORM_EXTRACTION_PROMPT.format(
         form_id=schema["form_id"],
         schema=schema_for_prompt,
         query=query,
         context=_format_context(chunks),
+        today=_today(),
     )
 
     resp = _client.chat(
@@ -112,13 +115,31 @@ def extract_form_data(query: str, chunks: list[dict], schema: dict) -> dict:
 
     # Normalize: tolerate either flat output or {data, missing_fields} shape
     if "data" in parsed and isinstance(parsed["data"], dict):
+        data = _clean_nulls(parsed["data"])
         return {
-            "data": parsed["data"],
+            "data": data,
             "missing_fields": parsed.get("missing_fields", []),
         }
 
+    data = _clean_nulls(parsed)
     missing = [
         name for name, spec in schema["fields"].items()
-        if spec["required"] and not parsed.get(name)
+        if spec["required"] and not data.get(name)
     ]
-    return {"data": parsed, "missing_fields": missing}
+    return {"data": data, "missing_fields": missing}
+
+
+def _clean_nulls(d: dict) -> dict:
+    """LLMs occasionally emit the literal string 'null' for unknown fields
+    instead of JSON null. Normalize both to empty so downstream form-fill
+    doesn't write the word 'null' into a PDF field.
+    """
+    cleaned = {}
+    for k, v in d.items():
+        if v is None:
+            cleaned[k] = ""
+        elif isinstance(v, str) and v.strip().lower() in ("null", "none", "n/a", "tbd"):
+            cleaned[k] = ""
+        else:
+            cleaned[k] = v
+    return cleaned
