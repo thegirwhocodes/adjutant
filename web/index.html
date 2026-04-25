@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Adjutant</title>
+  <link rel="stylesheet" href="/web/styles.css">
+</head>
+<body>
+  <header>
+    <h1>Adjutant</h1>
+    <p class="tagline">Voice-first, fully offline. Cites the regulation. Fills the form.</p>
+    <div id="net-status" class="badge">Checking network…</div>
+  </header>
+
+  <main>
+    <section class="mic-area">
+      <button id="mic-btn" type="button" aria-label="Hold to talk">
+        <span class="mic-icon">🎙</span>
+        <span class="mic-label">Hold to talk</span>
+      </button>
+      <p id="mic-hint">Try: <em>"I need to file leave for ten days starting June 3."</em></p>
+      <p id="transcript" class="transcript"></p>
+    </section>
+
+    <section class="reply" id="reply" hidden>
+      <h2>Adjutant says</h2>
+      <p id="spoken-summary"></p>
+      <audio id="reply-audio" controls></audio>
+
+      <h3>Citations</h3>
+      <ul id="citations"></ul>
+
+      <div id="form-section" hidden>
+        <h3>Generated form</h3>
+        <p id="form-meta"></p>
+        <iframe id="form-pdf" title="Filled PDF preview"></iframe>
+        <a id="form-download" href="#" download>Download PDF</a>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <small>Charlie Mike · SCSP Hackathon Boston 2026 · GenAI.mil track</small>
+  </footer>
+
+  <script src="/web/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+
+# Models / indices (rebuilt by scripts/)
+.faiss_index/
+.chunks/
+*.pkl
+models/
+
+# Corpus PDFs (downloaded by scripts/, not committed — keeps repo light)
+corpus/*.pdf
+corpus/*.html
+
+# Audio cache
+audio_cache/
+*.wav
+*.mp3
+!naomi_ref.wav
+!docs/*.wav
+
+# Filled PDFs (generated, not committed)
+filled_forms/
+*.filled.pdf
+
+# Env / secrets
+.env
+.env.local
+
+# Editor
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Logs
+*.log
+logs/

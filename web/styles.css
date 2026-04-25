@@ -1,0 +1,132 @@
+:root {
+  --bg: #0c1015;
+  --panel: #141a22;
+  --accent: #4d7c0f;     /* Army OD-green-ish */
+  --text: #e7eaee;
+  --muted: #9aa3ad;
+  --border: #1f2730;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+header {
+  padding: 2rem 1.5rem 1rem;
+  text-align: center;
+  border-bottom: 1px solid var(--border);
+}
+header h1 {
+  font-size: 2.4rem;
+  margin: 0;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.tagline { color: var(--muted); margin: 0.4rem 0 1rem; }
+
+.badge {
+  display: inline-block;
+  padding: 0.2rem 0.7rem;
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.badge.online   { background: #1e3a1e; color: #b6e4b6; }
+.badge.offline  { background: #3a1e1e; color: #f1bdbd; }
+
+main {
+  flex: 1;
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+  width: 100%;
+}
+
+.mic-area { text-align: center; margin-bottom: 2rem; }
+#mic-btn {
+  width: 180px;
+  height: 180px;
+  border-radius: 50%;
+  border: 3px solid var(--accent);
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+#mic-btn:hover { transform: scale(1.03); box-shadow: 0 0 30px rgba(77,124,15,0.4); }
+#mic-btn.recording {
+  background: #5b1a1a;
+  border-color: #c64a4a;
+  animation: pulse 1.2s infinite;
+}
+.mic-icon { display: block; font-size: 3rem; }
+.mic-label { display: block; margin-top: 0.4rem; font-size: 1rem; }
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(198,74,74,0.5); }
+  50% { box-shadow: 0 0 0 16px rgba(198,74,74,0); }
+}
+
+#mic-hint { color: var(--muted); margin-top: 1rem; }
+#mic-hint em { color: var(--text); }
+
+.transcript {
+  margin-top: 1rem;
+  padding: 0.8rem;
+  background: var(--panel);
+  border-radius: 8px;
+  min-height: 1.5em;
+  font-style: italic;
+  color: var(--muted);
+}
+.transcript:empty { display: none; }
+
+.reply {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.5rem;
+}
+.reply h2 { margin-top: 0; }
+.reply h3 { margin-top: 1.5rem; color: var(--accent); }
+
+#citations { padding-left: 1.2rem; }
+#citations li {
+  margin-bottom: 0.6rem;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+#citations strong { color: var(--text); }
+
+#form-pdf {
+  width: 100%;
+  height: 480px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: white;
+}
+
+#form-download {
+  display: inline-block;
+  margin-top: 1rem;
+  padding: 0.6rem 1rem;
+  background: var(--accent);
+  color: white;
+  text-decoration: none;
+  border-radius: 6px;
+}
+
+footer {
+  padding: 1rem;
+  text-align: center;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+}
