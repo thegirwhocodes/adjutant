@@ -1,0 +1,34 @@
+{
+  "atlanta, GA": {
+    "lodging": 175,
+    "mie": 79
+  },
+  "leesville, LA": {
+    "lodging": 110,
+    "mie": 68
+  },
+  "fayetteville, NC": {
+    "lodging": 119,
+    "mie": 68
+  },
+  "boston, MA": {
+    "lodging": 296,
+    "mie": 92
+  },
+  "washington, DC": {
+    "lodging": 257,
+    "mie": 92
+  },
+  "_state_default_GA": {
+    "lodging": 110,
+    "mie": 68
+  },
+  "_state_default_LA": {
+    "lodging": 110,
+    "mie": 68
+  },
+  "_state_default_NC": {
+    "lodging": 110,
+    "mie": 68
+  }
+}

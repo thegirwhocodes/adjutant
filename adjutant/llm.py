@@ -6,6 +6,7 @@ import os
 import re
 
 import ollama
+from dotenv import load_dotenv
 
 from adjutant.prompts import (
     FORM_EXTRACTION_PROMPT,
@@ -13,9 +14,13 @@ from adjutant.prompts import (
     SYSTEM_PROMPT,
 )
 
+# Load .env BEFORE reading any env var — otherwise constants captured at
+# import time use the defaults below instead of the values in .env.
+load_dotenv()
+
 log = logging.getLogger("adjutant.llm")
 
-MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
+MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:3b")
 HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 
 _client = ollama.Client(host=HOST)

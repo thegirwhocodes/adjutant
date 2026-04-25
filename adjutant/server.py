@@ -145,8 +145,21 @@ async def voice_pipeline(file: UploadFile = File(...), form_id: str | None = Non
 # ---------------------------------------------------------------------------
 
 def _infer_form(query: str) -> str | None:
-    """Lightweight intent classifier — substring match on form keywords."""
+    """Intent classifier — only triggers on action requests, not Q&A.
+
+    Requires both an action verb ("file", "submit", "draft", "fill", "need")
+    AND a topic keyword. Otherwise "How does leave accrue?" would falsely
+    trigger DA-31 form-fill.
+    """
     q = query.lower()
+    has_action = any(
+        v in q for v in (
+            "file", "submit", "draft", "fill", "need to", "want to",
+            "going on", "i'm going", "request", "put in"
+        )
+    )
+    if not has_action:
+        return None
     if any(k in q for k in ("leave", "vacation", "time off", "da-31", "da 31")):
         return "DA-31"
     if any(k in q for k in ("tdy", "travel", "voucher", "per diem", "trip", "dd-1351", "dd 1351")):

@@ -32,6 +32,16 @@ def fill_pdf(template_path: str, data: dict, output_path: str) -> str:
         )
 
     reader = PdfReader(str(template))
+
+    # Many Army forms ship "encrypted" with an empty owner password — pypdf
+    # refuses to clone them until decrypted, even though no real password
+    # is set. Try the empty-string decrypt; it's a no-op if not encrypted.
+    if reader.is_encrypted:
+        try:
+            reader.decrypt("")
+        except Exception as e:
+            log.warning(f"PDF decrypt with empty password failed ({e}); attempting clone anyway")
+
     writer = PdfWriter(clone_from=reader)
 
     fields = reader.get_fields() or {}

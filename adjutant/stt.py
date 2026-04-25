@@ -5,7 +5,11 @@ import logging
 import os
 import tempfile
 
+from dotenv import load_dotenv
 from faster_whisper import WhisperModel
+
+# Load .env before reading any env var (see note in llm.py).
+load_dotenv()
 
 log = logging.getLogger("adjutant.stt")
 
@@ -16,7 +20,7 @@ def _get_model() -> WhisperModel:
     """Lazy-load the Whisper model so import is fast."""
     global _MODEL
     if _MODEL is None:
-        size = os.getenv("WHISPER_MODEL", "large-v3")
+        size = os.getenv("WHISPER_MODEL", "small.en")
         device = os.getenv("WHISPER_DEVICE", "cpu")
         compute = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
         log.info(f"Loading Whisper {size} on {device} ({compute})")

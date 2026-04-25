@@ -11,7 +11,11 @@ from pathlib import Path
 
 import faiss
 import numpy as np
+from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer
+
+# Load .env before reading any env var (see note in llm.py).
+load_dotenv()
 
 log = logging.getLogger("adjutant.rag")
 
