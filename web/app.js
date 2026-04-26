@@ -121,8 +121,11 @@ function ensureAudioCtx() {
     // the destination (so the user actually hears it).
     botGain = audioCtx.createGain();
     botAnalyser = audioCtx.createAnalyser();
-    botAnalyser.fftSize = 256;
-    botAnalyser.smoothingTimeConstant = 0.85;
+    // ChatGPT AVM-grade settings: 512 bins, 0.3 smoothing — phoneme-level
+    // responsiveness without jitter. Anything larger blurs syllables; the
+    // 0.85 default washes out everything below the word level.
+    botAnalyser.fftSize = 512;
+    botAnalyser.smoothingTimeConstant = 0.3;
     botGain.connect(botAnalyser);
     botGain.connect(audioCtx.destination);
     botAnalyser.connect(audioCtx.destination);  // analyser is read-only;
@@ -193,8 +196,8 @@ function stopAllAudio() {
 function getOrCreateMicAnalyser(ctx) {
   if (!micAnalyser) {
     micAnalyser = ctx.createAnalyser();
-    micAnalyser.fftSize = 256;
-    micAnalyser.smoothingTimeConstant = 0.85;
+    micAnalyser.fftSize = 512;             // ChatGPT-AVM responsiveness
+    micAnalyser.smoothingTimeConstant = 0.3;
   }
   return micAnalyser;
 }
@@ -206,79 +209,134 @@ function detachMicAnalyser() {
 function startOrb() {
   const canvas = document.getElementById("voice-orb");
   if (!canvas || orbRafHandle) return;
-  const dpr = window.devicePixelRatio || 1;
-  const cssSize = canvas.clientWidth || canvas.width;
-  canvas.width = cssSize * dpr;
-  canvas.height = cssSize * dpr;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const cssW = canvas.clientWidth || canvas.width;
+  const cssH = canvas.clientHeight || canvas.height || cssW;
+  canvas.width  = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
   const ctx2d = canvas.getContext("2d");
-  const w = canvas.width;
-  const h = canvas.height;
-  const cx = w / 2;
-  const cy = h / 2;
-  const baseR = Math.min(w, h) * 0.22;
-  const maxR  = Math.min(w, h) * 0.46;
 
-  // Reusable byte buffers for the analyzers.
-  const micBuf = new Uint8Array(128);
-  const botBuf = new Uint8Array(128);
-  let phase = 0;
+  // ChatGPT AVM / ElevenLabs construction:
+  //   - 3 concentric translucent radial-gradient spheres at scales 1.00 / 0.85 / 0.70
+  //   - per-layer phase + opposite rotation directions
+  //   - Simplex-noise stand-in via summed sine waves
+  //   - Fresnel-style hollow center via radial gradient stops
+  //   - Audio-reactive amplitude → outer-radius scale, exponential envelope
+  // Adjutant amber palette matching the operator-console brand.
+  const STATES = {
+    idle:          { c: ["#3a2f10", "#3a2f10", "#3a2f10"], speed: 0.6,  pulseMin: 1.00, pulseMax: 0.0  },
+    listening:     { c: ["#E0B341", "#FFB000", "#FFD24A"], speed: 1.0,  pulseMin: 1.02, pulseMax: 0.25 },
+    speaking_user: { c: ["#5fb8d6", "#7CC5E0", "#A0DCF0"], speed: 1.1,  pulseMin: 1.02, pulseMax: 0.25 },
+    thinking:      { c: ["#FF6A00", "#FF8A2A", "#FFB050"], speed: 1.5,  pulseMin: 1.00, pulseMax: 0.15 },
+    speaking:      { c: ["#FFD24A", "#FFC227", "#FFE780"], speed: 1.7,  pulseMin: 1.05, pulseMax: 0.22 },
+    error:         { c: ["#d24545", "#e26060", "#f08080"], speed: 0.9,  pulseMin: 1.00, pulseMax: 0.05 },
+  };
 
-  function levelOf(analyser, buf) {
+  const micBuf = new Uint8Array(256);  // matches fftSize=512 → 256 bins
+  const botBuf = new Uint8Array(256);
+
+  // Vocal-formant slice (bins ~10–40) — what makes the orb react to speech,
+  // not to room hum or sibilance. Same trick OpenAI's 'voice' filter uses.
+  function vocalLevel(analyser, buf) {
     if (!analyser) return 0;
     analyser.getByteFrequencyData(buf);
     let sum = 0;
-    for (let i = 0; i < buf.length; i++) sum += buf[i];
-    return (sum / buf.length) / 255;  // 0..1
+    const lo = 10, hi = Math.min(40, buf.length);
+    for (let i = lo; i < hi; i++) sum += buf[i];
+    const avg = sum / (hi - lo) / 255;
+    // Soft floor + headroom: ignore <6%, saturate at ~66% of max-loud
+    return Math.max(0, Math.min(1, (avg - 0.06) / 0.6));
   }
 
-  function render() {
-    phase += 0.04;
+  function hexToRGBA(h, a) {
+    const v = h.charAt(0) === "#" ? h.slice(1) : h;
+    return `rgba(${parseInt(v.slice(0,2),16)},${parseInt(v.slice(2,4),16)},${parseInt(v.slice(4,6),16)},${a})`;
+  }
+
+  let env = 0;
+  function tickEnv(target) {
+    // Faster attack on rise, slower decay — perceptually correct
+    const k = target > env ? 0.35 : 0.10;
+    env += (target - env) * k;
+    return env;
+  }
+
+  function render(now) {
+    const t = (now || performance.now()) * 0.001;
+    const w = canvas.width, h = canvas.height;
+    const cx = w / 2, cy = h / 2;
+    const R  = Math.min(w, h) * 0.42;
+
+    const s = STATES[currentState] || STATES.idle;
+
+    // Drive amplitude from whichever side is active
+    const micLvl = (currentState === "listening" || currentState === "speaking_user")
+                   ? vocalLevel(micAnalyser, micBuf) : 0;
+    const botLvl = (currentState === "speaking") ? vocalLevel(botAnalyser, botBuf) : 0;
+    const live = Math.max(micLvl, botLvl);
+
+    // Synthetic breathing — only in states without live audio (idle/thinking)
+    const breath = (Math.sin(t * 1.4) * 0.5 + 0.5);
+    const target = live > 0 ? live : (s.pulseMax * breath);
+    const amp = tickEnv(target);
+
     ctx2d.clearRect(0, 0, w, h);
 
-    // Whichever side is louder drives the pulse; idle ambient if both quiet.
-    const micLvl = levelOf(micAnalyser, micBuf);
-    const botLvl = levelOf(botAnalyser, botBuf);
-    const live   = Math.max(micLvl, botLvl);
-    const ambient = 0.05 + 0.04 * (Math.sin(phase) * 0.5 + 0.5);
-    const lvl = Math.max(live, ambient);
+    // Soft warm vignette behind the orb (matches the page's amber bias)
+    const vg = ctx2d.createRadialGradient(cx, cy, 0, cx, cy, R * 1.7);
+    vg.addColorStop(0,    hexToRGBA(s.c[0], 0.06));
+    vg.addColorStop(0.55, hexToRGBA(s.c[0], 0.02));
+    vg.addColorStop(1,    "rgba(0,0,0,0)");
+    ctx2d.fillStyle = vg;
+    ctx2d.fillRect(0, 0, w, h);
 
-    const stateColor = (
-      currentState === "speaking"      ? "#4d7c0f" :
-      currentState === "thinking"      ? "#d97706" :
-      currentState === "speaking_user" ? "#2563eb" :
-      currentState === "listening"     ? "#2563eb" :
-      currentState === "error"         ? "#b91c1c" :
-                                          "#3a4250"
+    // Three concentric layers — additive blending so overlaps brighten
+    const baseScale = [1.00, 0.85, 0.70];
+    const phaseOff  = [0.0, 1.7, 3.4];
+    const dir       = [1, -1, 1];
+
+    ctx2d.globalCompositeOperation = "lighter";
+    for (let i = 0; i < 3; i++) {
+      const wobble = Math.sin(t * s.speed + phaseOff[i]) * 0.025 * dir[i];
+      const r = R * baseScale[i] * (s.pulseMin + wobble + amp * s.pulseMax);
+      const c = s.c[i];
+
+      const g = ctx2d.createRadialGradient(cx, cy, 0, cx, cy, r);
+      g.addColorStop(0.00, hexToRGBA(c, 0.00));   // hollow center (fresnel)
+      g.addColorStop(0.45, hexToRGBA(c, 0.05 + amp * 0.10));
+      g.addColorStop(0.78, hexToRGBA(c, 0.18 + amp * 0.18));
+      g.addColorStop(0.95, hexToRGBA(c, 0.42 + amp * 0.28));
+      g.addColorStop(1.00, hexToRGBA(c, 0.00));
+      ctx2d.fillStyle = g;
+      ctx2d.beginPath();
+      ctx2d.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx2d.fill();
+    }
+
+    // Bright off-center core highlight — chromatic-aberration analog
+    ctx2d.globalCompositeOperation = "screen";
+    const hgr = ctx2d.createRadialGradient(
+      cx - R * 0.18, cy - R * 0.22, 0,
+      cx - R * 0.18, cy - R * 0.22, R * 0.55
     );
+    hgr.addColorStop(0,    hexToRGBA(s.c[2], 0.18 + amp * 0.10));
+    hgr.addColorStop(0.55, hexToRGBA(s.c[2], 0.04));
+    hgr.addColorStop(1,    "rgba(0,0,0,0)");
+    ctx2d.fillStyle = hgr;
+    ctx2d.fillRect(0, 0, w, h);
 
-    const r = baseR + (maxR - baseR) * lvl;
+    // Outer glow — soft halo extending past the sphere's edge
+    ctx2d.globalCompositeOperation = "lighter";
+    const og = ctx2d.createRadialGradient(cx, cy, R * 0.95, cx, cy, R * 1.35);
+    og.addColorStop(0, hexToRGBA(s.c[0], 0.08 + amp * 0.10));
+    og.addColorStop(1, "rgba(0,0,0,0)");
+    ctx2d.fillStyle = og;
+    ctx2d.fillRect(0, 0, w, h);
 
-    // Outer halo — radial gradient that gets brighter with amplitude
-    const halo = ctx2d.createRadialGradient(cx, cy, baseR * 0.4, cx, cy, r * 1.4);
-    halo.addColorStop(0,   `${stateColor}cc`);
-    halo.addColorStop(0.5, `${stateColor}33`);
-    halo.addColorStop(1,   `${stateColor}00`);
-    ctx2d.fillStyle = halo;
-    ctx2d.beginPath();
-    ctx2d.arc(cx, cy, r * 1.4, 0, Math.PI * 2);
-    ctx2d.fill();
-
-    // Inner solid orb
-    const orbGrad = ctx2d.createRadialGradient(
-      cx - r * 0.3, cy - r * 0.3, 0,
-      cx, cy, r
-    );
-    orbGrad.addColorStop(0, "rgba(255,255,255,0.92)");
-    orbGrad.addColorStop(0.45, stateColor);
-    orbGrad.addColorStop(1, "rgba(20,26,34,0.9)");
-    ctx2d.fillStyle = orbGrad;
-    ctx2d.beginPath();
-    ctx2d.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx2d.fill();
-
+    ctx2d.globalCompositeOperation = "source-over";
     orbRafHandle = requestAnimationFrame(render);
   }
-  render();
+  orbRafHandle = requestAnimationFrame(render);
 }
 
 function stopOrb() {
