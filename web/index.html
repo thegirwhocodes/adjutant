@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#f2efe8">
-  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#0b0d10">
+  <meta name="color-scheme" content="dark">
   <title>Adjutant — voice-first, fully offline AI for Army paperwork</title>
   <meta name="description" content="Adjutant is a voice-first AI assistant that fills out DA-31, DD-1351-2, and DA-4856 from a soldier's voice. Cites the regulation by section. Runs on a laptop. No signal required.">
 
@@ -43,6 +43,77 @@
   <a href="#demo" class="skip-link">Skip to live demo</a>
 
   <!-- ============================================================ -->
+  <!-- EQUIPMENT FRAME — bezel wrapping the viewport                  -->
+  <!-- ============================================================ -->
+  <div class="frame frame--t" aria-hidden="true"></div>
+  <div class="frame frame--r" aria-hidden="true"></div>
+  <div class="frame frame--b" aria-hidden="true"></div>
+  <div class="frame frame--l" aria-hidden="true"></div>
+
+  <!-- Edge labels: stenciled serial along the bottom + sides -->
+  <div class="frame__label frame__label--bottom" aria-hidden="true">
+    <span>ADJUTANT v0.1 · OFFLINE-CAPABLE · MIL-SPEC-PROTOTYPE</span>
+    <span>FORM-001-A · ARN30018 · NSN: PENDING</span>
+  </div>
+  <div class="frame__label frame__label--left" aria-hidden="true">
+    <span>CHARLIE MIKE · SCSP · BOSTON · APRIL 2026</span>
+  </div>
+  <div class="frame__label frame__label--right" aria-hidden="true">
+    <span>ADJUTANT · SPEAK IT · SIGN IT · MOVE OUT</span>
+  </div>
+
+  <!-- Corner registration marks + screws -->
+  <span class="reg reg--tl" aria-hidden="true"></span>
+  <span class="reg reg--tr" aria-hidden="true"></span>
+  <span class="reg reg--bl" aria-hidden="true"></span>
+  <span class="reg reg--br" aria-hidden="true"></span>
+
+  <span class="screw screw--tl" aria-hidden="true"></span>
+  <span class="screw screw--tr" aria-hidden="true"></span>
+  <span class="screw screw--bl" aria-hidden="true"></span>
+  <span class="screw screw--br" aria-hidden="true"></span>
+
+  <!-- ============================================================ -->
+  <!-- CLASSIFICATION BANNER (top)                                    -->
+  <!-- ============================================================ -->
+  <div class="banner banner--top" aria-hidden="true">
+    UNCLASSIFIED // OPEN SOURCE // BUILT FOR THE RANK-AND-FILE
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- TELEMETRY STRIP — callsign / DTG / GPS / network / battery    -->
+  <!-- ============================================================ -->
+  <div class="telemetry" aria-label="System telemetry">
+    <span class="telemetry__group">
+      <span class="lamp lamp--ok"></span>
+      <span class="telemetry__key">CALLSIGN</span>
+      <span class="telemetry__val">ADJUTANT-01</span>
+    </span>
+    <span class="telemetry__group">
+      <span class="telemetry__key">DTG</span>
+      <span class="telemetry__val mono" id="dtg">—</span>
+    </span>
+    <span class="telemetry__group telemetry__group--secondary">
+      <span class="telemetry__key">GRID</span>
+      <span class="telemetry__val">17S NA 96321 79124</span>
+    </span>
+    <span class="telemetry__spacer" aria-hidden="true"></span>
+    <span class="telemetry__group">
+      <span class="lamp lamp--amber lamp--blink"></span>
+      <span class="telemetry__key">NET</span>
+      <span class="telemetry__val telemetry__val--amber" id="net-status">LOCAL</span>
+    </span>
+    <span class="telemetry__group telemetry__group--secondary">
+      <span class="telemetry__key">GPS</span>
+      <span class="telemetry__val telemetry__val--ok">LOCK</span>
+    </span>
+    <span class="telemetry__group telemetry__group--secondary">
+      <span class="telemetry__key">BATT</span>
+      <span class="telemetry__val">84%</span>
+    </span>
+  </div>
+
+  <!-- ============================================================ -->
   <!-- NAV                                                            -->
   <!-- ============================================================ -->
   <header class="nav" id="nav">
@@ -65,20 +136,15 @@
 
   <!-- ============================================================ -->
   <!-- HERO                                                           -->
-  <!-- Split composition: copy left, live mock device right.          -->
-  <!-- Above-the-fold reveals are NEVER opacity-staggered — page is   -->
-  <!-- legible at first paint with JS off.                            -->
   <!-- ============================================================ -->
   <section class="hero" id="top">
-    <div class="hero__chrome">
-      <span class="chrome__id mono">001 · CHARLIE MIKE</span>
-      <span class="chrome__sep" aria-hidden="true">/</span>
-      <span class="chrome__loc mono">SCSP HACKATHON · BOSTON · APRIL 2026</span>
-      <span class="chrome__sep" aria-hidden="true">/</span>
-      <span class="chrome__track mono">GENAI.MIL TRACK</span>
-      <span class="chrome__spacer" aria-hidden="true"></span>
-      <span id="net-status" class="badge">Local</span>
-    </div>
+    <!-- Capability strip: Saronic verbs, hard-cornered -->
+    <ol class="capability">
+      <li class="capability__item"><span class="capability__num">001</span><span class="capability__verb">Listen</span></li>
+      <li class="capability__item"><span class="capability__num">002</span><span class="capability__verb">Cite</span></li>
+      <li class="capability__item"><span class="capability__num">003</span><span class="capability__verb">Draft</span></li>
+      <li class="capability__item"><span class="capability__num">004</span><span class="capability__verb">Sign</span></li>
+    </ol>
 
     <div class="hero__grid">
       <div class="hero__copy">
@@ -114,72 +180,66 @@
         </dl>
       </div>
 
-      <!-- Animated DA-31 device -->
+      <!-- Animated DA-31 device (bezeled instrument) -->
       <aside class="hero__device" aria-label="Live form-fill preview">
-        <article class="device">
-          <header class="device__bar">
-            <span class="device__dots" aria-hidden="true"><i></i><i></i><i></i></span>
-            <span class="mono device__title">DA-31 · ARN30018</span>
-            <span class="mono device__sig" id="device-sig">filling</span>
-          </header>
-          <div class="device__body">
-            <div class="device__row" style="--d:0.0s">
-              <span class="mono device__field">name</span>
-              <span class="device__val">CHEN, MAYA L.</span>
+        <div class="bezel">
+          <article class="device">
+            <header class="device__bar">
+              <span class="device__dots" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span class="mono device__title">DA-31 · ARN30018</span>
+              <span class="mono device__sig" id="device-sig">filling</span>
+            </header>
+            <div class="device__body">
+              <div class="device__row" style="--d:0.0s">
+                <span class="mono device__field">name</span>
+                <span class="device__val">CHEN, MAYA L.</span>
+              </div>
+              <div class="device__row" style="--d:0.25s">
+                <span class="mono device__field">rank</span>
+                <span class="device__val">SGT / E-5</span>
+              </div>
+              <div class="device__row" style="--d:0.45s">
+                <span class="mono device__field">unit</span>
+                <span class="device__val">2-504 PIR · 82ND ABN</span>
+              </div>
+              <div class="device__row" style="--d:0.7s">
+                <span class="mono device__field">type</span>
+                <span class="device__val">ORDINARY</span>
+              </div>
+              <div class="device__row" style="--d:0.95s">
+                <span class="mono device__field">dates</span>
+                <span class="device__val">03 JUN 2026 — 13 JUN 2026</span>
+              </div>
+              <div class="device__row" style="--d:1.2s">
+                <span class="mono device__field">days</span>
+                <span class="device__val">10</span>
+              </div>
+              <div class="device__row" style="--d:1.45s">
+                <span class="mono device__field">poc</span>
+                <span class="device__val">MARIA CHEN · 919-555-0144</span>
+              </div>
+              <div class="device__rule"></div>
+              <div class="device__cite" style="--d:1.75s">
+                <span class="mono device__cite-tag">CITED</span>
+                <span>AR 600-8-10 ¶ 4-3 — leave authorization &amp; accrual.</span>
+              </div>
             </div>
-            <div class="device__row" style="--d:0.25s">
-              <span class="mono device__field">rank</span>
-              <span class="device__val">SGT / E-5</span>
-            </div>
-            <div class="device__row" style="--d:0.45s">
-              <span class="mono device__field">unit</span>
-              <span class="device__val">2-504 PIR · 82ND ABN</span>
-            </div>
-            <div class="device__row" style="--d:0.7s">
-              <span class="mono device__field">type</span>
-              <span class="device__val">ORDINARY</span>
-            </div>
-            <div class="device__row" style="--d:0.95s">
-              <span class="mono device__field">dates</span>
-              <span class="device__val">03 JUN 2026 — 13 JUN 2026</span>
-            </div>
-            <div class="device__row" style="--d:1.2s">
-              <span class="mono device__field">days</span>
-              <span class="device__val">10</span>
-            </div>
-            <div class="device__row" style="--d:1.45s">
-              <span class="mono device__field">poc</span>
-              <span class="device__val">MARIA CHEN · 919-555-0144</span>
-            </div>
-            <div class="device__rule"></div>
-            <div class="device__cite" style="--d:1.75s">
-              <span class="mono device__cite-tag">CITED</span>
-              <span>AR 600-8-10 ¶ 4-3 — leave authorization &amp; accrual.</span>
-            </div>
-          </div>
-          <footer class="device__foot mono">
-            <span class="device__pulse" aria-hidden="true"></span>
-            <span>1.2&nbsp;s · ESV→FAO · on-device</span>
-          </footer>
-        </article>
-
-        <div class="hero__device-coord mono" aria-hidden="true">
-          LAT 42.36° / LON -71.06°
+            <footer class="device__foot mono">
+              <span class="device__pulse" aria-hidden="true"></span>
+              <span>1.2&nbsp;s · ESV→FAO · on-device</span>
+            </footer>
+          </article>
         </div>
+        <div class="hero__device-coord">LAT 42.36° / LON -71.06° · BOSTON</div>
       </aside>
     </div>
-
-    <a href="#problem" class="hero__scroll mono" aria-label="Scroll to problem">
-      <span>scroll</span>
-      <span class="hero__scroll-line" aria-hidden="true"></span>
-    </a>
   </section>
 
   <!-- ============================================================ -->
   <!-- MARQUEE                                                        -->
   <!-- ============================================================ -->
   <section class="marquee" aria-label="Regulations indexed">
-    <div class="marquee__label mono">
+    <div class="marquee__label">
       <span class="dot" aria-hidden="true"></span>
       <span>CORPUS · 16,301 chunks · MiniLM-L6 · FAISS</span>
     </div>
@@ -236,7 +296,7 @@
   </section>
 
   <!-- ============================================================ -->
-  <!-- LIVE DEMO — DARK CONSOLE INSTRUMENT                            -->
+  <!-- LIVE DEMO                                                      -->
   <!-- ============================================================ -->
   <section class="section section--demo" id="demo">
     <div class="section__head">
@@ -253,89 +313,92 @@
       </p>
     </div>
 
-    <div class="console reveal">
-      <header class="console__bar">
-        <span class="console__dots" aria-hidden="true"><i></i><i></i><i></i></span>
-        <span class="console__title mono">adjutant.local · /ws/voice</span>
-        <span class="console__latency mono" id="latency-badge"
-              title="End-of-speech to first audio out">
-          <span class="lat-key">ESV→FAO</span>
-          <span class="lat-val" id="latency-ms">—</span>
-          <span class="lat-unit">ms</span>
-        </span>
-        <button type="button" id="sim-offline" class="console__sim mono"
-                title="Pull the wifi (simulation) — Adjutant keeps working">
-          ⏻ Simulate offline
-        </button>
-        <span class="console__pill mono">100% LOCAL</span>
-      </header>
+    <div class="bezel reveal">
+      <div class="console">
+        <header class="console__bar">
+          <span class="console__dots" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="console__title mono">adjutant.local · /ws/voice</span>
+          <span class="console__latency mono" id="latency-badge"
+                title="End-of-speech to first audio out">
+            <span class="lat-key">ESV→FAO</span>
+            <span class="lat-val" id="latency-ms">—</span>
+            <span class="lat-unit">ms</span>
+          </span>
+          <button type="button" id="sim-offline" class="console__sim mono"
+                  title="Pull the wifi (simulation) — Adjutant keeps working">
+            ⏻ Simulate offline
+          </button>
+          <span class="console__pill mono">100% LOCAL</span>
+        </header>
 
-      <div id="tier-status" class="tier-status" aria-label="Corpus tier status">
-        <div class="tier" data-tier="HOT">
-          <span class="tier-led" data-status="unknown"></span>
-          <span class="tier-name">HOT</span>
-          <span class="tier-meta">on-device · always</span>
+        <div id="tier-status" class="tier-status" aria-label="Corpus tier status">
+          <div class="tier" data-tier="HOT">
+            <span class="tier-led" data-status="unknown"></span>
+            <span class="tier-name">HOT</span>
+            <span class="tier-meta">on-device · always</span>
+          </div>
+          <div class="tier" data-tier="WARM">
+            <span class="tier-led" data-status="unknown"></span>
+            <span class="tier-name">WARM</span>
+            <span class="tier-meta">on-base · NIPR</span>
+          </div>
+          <div class="tier" data-tier="COLD">
+            <span class="tier-led" data-status="unknown"></span>
+            <span class="tier-name">COLD</span>
+            <span class="tier-meta">cloud · FedRAMP</span>
+          </div>
+          <p class="tier-caption">Tiers degrade gracefully · demo runs on HOT</p>
         </div>
-        <div class="tier" data-tier="WARM">
-          <span class="tier-led" data-status="unknown"></span>
-          <span class="tier-name">WARM</span>
-          <span class="tier-meta">on-base · NIPR</span>
-        </div>
-        <div class="tier" data-tier="COLD">
-          <span class="tier-led" data-status="unknown"></span>
-          <span class="tier-name">COLD</span>
-          <span class="tier-meta">cloud · FedRAMP</span>
-        </div>
-        <p class="tier-caption mono">
-          Tiers degrade gracefully. The demo runs on HOT.
-        </p>
-      </div>
 
-      <div class="console__body">
-        <div class="mic-area">
-          <div class="state-row">
-            <div id="state-indicator" data-state="idle"></div>
-            <div id="state-label">Press start to begin</div>
+        <div class="console__body">
+          <div class="mic-area">
+            <canvas id="voice-orb" class="voice-orb" width="320" height="320"
+                    aria-hidden="true"></canvas>
+
+            <div class="state-row">
+              <div id="state-indicator" data-state="idle"></div>
+              <div id="state-label">Press start to begin</div>
+            </div>
+
+            <div class="voice-controls">
+              <button id="start-btn" type="button" class="cbtn cbtn--primary">
+                <span>Start voice</span>
+                <span class="cbtn__icon" aria-hidden="true">●</span>
+              </button>
+              <button id="mute-btn" type="button" class="cbtn cbtn--ghost">
+                <span>Mute / interrupt</span>
+              </button>
+            </div>
+
+            <p id="transcript" class="transcript"></p>
+
+            <p id="mic-hint" class="hint">
+              Try: <em>"I need to file leave for ten days starting June 3."</em>
+            </p>
+
+            <details class="fallback">
+              <summary>Push-to-talk fallback</summary>
+              <button id="fallback-mic" type="button" aria-label="Hold to talk">
+                <span class="mic-icon" aria-hidden="true">●</span>
+                <span class="mic-label">Hold to talk</span>
+              </button>
+              <p>Use only if continuous voice fails at the venue.</p>
+            </details>
           </div>
 
-          <div class="voice-controls">
-            <button id="start-btn" type="button" class="cbtn cbtn--primary">
-              <span>Start voice</span>
-              <span class="cbtn__icon" aria-hidden="true">●</span>
-            </button>
-            <button id="mute-btn" type="button" class="cbtn cbtn--ghost">
-              <span>Mute / interrupt</span>
-            </button>
-          </div>
+          <section class="reply" id="reply" hidden>
+            <div class="reply__head">
+              <h3>Adjutant says</h3>
+              <span class="reply__pill mono">RETRIEVAL-GROUNDED</span>
+            </div>
+            <p id="spoken-summary" class="reply__spoken"></p>
 
-          <p id="transcript" class="transcript"></p>
+            <h4 class="reply__sub">Citations</h4>
+            <ul id="citations" class="citations"></ul>
 
-          <p id="mic-hint" class="hint">
-            Try: <em>"I need to file leave for ten days starting June 3."</em>
-          </p>
-
-          <details class="fallback">
-            <summary>Push-to-talk fallback</summary>
-            <button id="fallback-mic" type="button" aria-label="Hold to talk">
-              <span class="mic-icon" aria-hidden="true">●</span>
-              <span class="mic-label">Hold to talk</span>
-            </button>
-            <p>Use only if continuous voice fails at the venue.</p>
-          </details>
+            <div id="form-section" class="forms-out" hidden></div>
+          </section>
         </div>
-
-        <section class="reply" id="reply" hidden>
-          <div class="reply__head">
-            <h3>Adjutant says</h3>
-            <span class="reply__pill mono">RETRIEVAL-GROUNDED</span>
-          </div>
-          <p id="spoken-summary" class="reply__spoken"></p>
-
-          <h4 class="reply__sub mono">Citations</h4>
-          <ul id="citations" class="citations"></ul>
-
-          <div id="form-section" class="forms-out" hidden></div>
-        </section>
       </div>
     </div>
   </section>
@@ -352,7 +415,7 @@
         <span>need to counsel SPC Garcia tomorrow,</span>
         <span>and want two days of leave when I get back."</span>
       </p>
-      <footer class="wow__attrib mono">
+      <footer class="wow__attrib">
         <span aria-hidden="true">→</span>
         <span>One voice request.</span>
         <span class="hl">Three filled PDFs.</span>
@@ -389,7 +452,7 @@
     <ol class="pipeline">
       <li class="stage reveal">
         <div class="stage__head">
-          <span class="stage__num mono">001</span>
+          <span class="stage__num">001</span>
           <span class="stage__verb">Speak</span>
         </div>
         <h3 class="stage__title">STT</h3>
@@ -401,7 +464,7 @@
       </li>
       <li class="stage reveal">
         <div class="stage__head">
-          <span class="stage__num mono">002</span>
+          <span class="stage__num">002</span>
           <span class="stage__verb">Recall</span>
         </div>
         <h3 class="stage__title">RAG</h3>
@@ -413,7 +476,7 @@
       </li>
       <li class="stage reveal">
         <div class="stage__head">
-          <span class="stage__num mono">003</span>
+          <span class="stage__num">003</span>
           <span class="stage__verb">Reason</span>
         </div>
         <h3 class="stage__title">LLM</h3>
@@ -426,7 +489,7 @@
       </li>
       <li class="stage reveal">
         <div class="stage__head">
-          <span class="stage__num mono">004</span>
+          <span class="stage__num">004</span>
           <span class="stage__verb">Fill</span>
         </div>
         <h3 class="stage__title">PDF</h3>
@@ -439,7 +502,7 @@
       </li>
       <li class="stage reveal">
         <div class="stage__head">
-          <span class="stage__num mono">005</span>
+          <span class="stage__num">005</span>
           <span class="stage__verb">Speak</span>
         </div>
         <h3 class="stage__title">TTS</h3>
@@ -467,7 +530,7 @@
 
     <div class="claims">
       <article class="claim reveal">
-        <span class="claim__num mono">a.</span>
+        <span class="claim__num">a.</span>
         <h3>Architecturally offline.</h3>
         <p>
           Whisper, Llama, Kokoro, FAISS, MiniLM — all loaded from disk at
@@ -478,7 +541,7 @@
       </article>
 
       <article class="claim reveal">
-        <span class="claim__num mono">b.</span>
+        <span class="claim__num">b.</span>
         <h3>Architecturally cited.</h3>
         <p>
           Every spoken summary ships with verbatim source quotes — section,
@@ -488,7 +551,7 @@
       </article>
 
       <article class="claim reveal">
-        <span class="claim__num mono">c.</span>
+        <span class="claim__num">c.</span>
         <h3>Architecturally refuses.</h3>
         <p>
           A retrieval threshold of 0.35 means out-of-corpus questions return
@@ -517,22 +580,22 @@
 
     <div class="eval-grid reveal">
       <article class="eval-cell">
-        <span class="eval-cell__label mono">RETRIEVAL CORRECTNESS</span>
+        <span class="eval-cell__label">RETRIEVAL CORRECTNESS</span>
         <span class="eval-cell__num">92<span class="eval-cell__unit">%</span></span>
         <span class="eval-cell__meta mono">n = 120 · top-3 chunk includes ground-truth</span>
       </article>
       <article class="eval-cell">
-        <span class="eval-cell__label mono">REFUSAL CORRECTNESS</span>
+        <span class="eval-cell__label">REFUSAL CORRECTNESS</span>
         <span class="eval-cell__num">98<span class="eval-cell__unit">%</span></span>
         <span class="eval-cell__meta mono">n = 40 · OOC queries below 0.35 sim score</span>
       </article>
       <article class="eval-cell">
-        <span class="eval-cell__label mono">ESV → FAO · p50</span>
+        <span class="eval-cell__label">ESV → FAO · p50</span>
         <span class="eval-cell__num">1.2<span class="eval-cell__unit">s</span></span>
         <span class="eval-cell__meta mono">end of speech → first audio · M1 · warm</span>
       </article>
       <article class="eval-cell">
-        <span class="eval-cell__label mono">FORM-FILL ACCURACY</span>
+        <span class="eval-cell__label">FORM-FILL ACCURACY</span>
         <span class="eval-cell__num">94<span class="eval-cell__unit">%</span></span>
         <span class="eval-cell__meta mono">n = 60 · field-level F1 vs hand-graded</span>
       </article>
@@ -554,15 +617,15 @@
     <div class="form-cards">
       <article class="form-card reveal">
         <header class="form-card__head">
-          <span class="form-card__id mono">001 · DA-31</span>
-          <span class="form-card__reg mono">AR 600-8-10</span>
+          <span class="form-card__id">001 · DA-31</span>
+          <span class="form-card__reg">AR 600-8-10</span>
         </header>
         <h3 class="form-card__title">Request and Authority for Leave</h3>
         <p class="form-card__copy">
           The most-touched form in the Army. XFA-only — Adjutant uses a
           hand-tuned reportlab coordinate-overlay engine to populate it.
         </p>
-        <ul class="form-card__meta mono">
+        <ul class="form-card__meta">
           <li>type · XFA</li>
           <li>engine · reportlab overlay</li>
           <li>cited at · ¶ 4-3 leave authorization</li>
@@ -571,15 +634,15 @@
 
       <article class="form-card reveal">
         <header class="form-card__head">
-          <span class="form-card__id mono">002 · DD-1351-2</span>
-          <span class="form-card__reg mono">JTR 2025</span>
+          <span class="form-card__id">002 · DD-1351-2</span>
+          <span class="form-card__reg">JTR 2025</span>
         </header>
         <h3 class="form-card__title">Travel Voucher</h3>
         <p class="form-card__copy">
           Hybrid XFA + AcroForm. Adjutant strips /XFA so non-Adobe viewers
           render. Per-diem math runs in Python from a GSA rate table.
         </p>
-        <ul class="form-card__meta mono">
+        <ul class="form-card__meta">
           <li>type · hybrid XFA / AcroForm</li>
           <li>engine · pikepdf field-fill</li>
           <li>math · GSA per-diem (deterministic)</li>
@@ -588,15 +651,15 @@
 
       <article class="form-card reveal">
         <header class="form-card__head">
-          <span class="form-card__id mono">003 · DA-4856</span>
-          <span class="form-card__reg mono">AR 623-3</span>
+          <span class="form-card__id">003 · DA-4856</span>
+          <span class="form-card__reg">AR 623-3</span>
         </header>
         <h3 class="form-card__title">Developmental Counseling</h3>
         <p class="form-card__copy">
           Required after almost every personnel action. AcroForm-mostly,
           fills via pikepdf. Cites the AR 623-3 evaluation framework.
         </p>
-        <ul class="form-card__meta mono">
+        <ul class="form-card__meta">
           <li>type · AcroForm</li>
           <li>engine · pikepdf primary</li>
           <li>cited at · evaluation reporting system</li>
@@ -732,15 +795,22 @@
   <!-- ============================================================ -->
   <footer class="foot">
     <div class="foot__row">
-      <span class="foot__brand mono">▌Adjutant · v0.1</span>
+      <span class="foot__brand">▌Adjutant · v0.1</span>
       <span class="foot__meta">Charlie Mike · SCSP Hackathon Boston · GenAI.mil track · April 2026</span>
     </div>
-    <div class="foot__row foot__row--small mono">
+    <div class="foot__row foot__row--small">
       <span>BUILT ON · M1 MACBOOK AIR · 8 GB</span>
       <span>STACK · WHISPER · LLAMA 3.2 · KOKORO 82M · SILERO VAD · FAISS · PIKEPDF · REPORTLAB</span>
       <span>ORIGIN · THE SABI VOICE PIPELINE, PORTED</span>
     </div>
   </footer>
+
+  <!-- ============================================================ -->
+  <!-- CLASSIFICATION BANNER (bottom)                                 -->
+  <!-- ============================================================ -->
+  <div class="banner banner--bottom" aria-hidden="true">
+    UNCLASSIFIED // OPEN SOURCE // BUILT FOR THE RANK-AND-FILE
+  </div>
 
   <script src="/web/marketing.js" defer></script>
   <script src="/web/app.js" defer></script>

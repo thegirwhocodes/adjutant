@@ -146,18 +146,45 @@
     simBtn.addEventListener("click", () => {
       if (simBtn.classList.contains("simulating")) return;
       simBtn.classList.add("simulating");
-      simBtn.textContent = "● simulating offline";
+      simBtn.textContent = "● SIMULATING OFFLINE";
       const prevText = netBadge.textContent;
       const prevClass = netBadge.className;
-      netBadge.textContent = "OFFLINE — still working";
-      netBadge.className = "badge offline";
+      const lamp = netBadge.parentElement && netBadge.parentElement.querySelector(".lamp");
+      const prevLampClass = lamp ? lamp.className : null;
+      netBadge.textContent = "OFFLINE";
+      netBadge.className = "telemetry__val telemetry__val--alert";
+      if (lamp) lamp.className = "lamp lamp--alert";
       setTimeout(() => {
         netBadge.textContent = prevText;
         netBadge.className = prevClass;
+        if (lamp && prevLampClass) lamp.className = prevLampClass;
         simBtn.classList.remove("simulating");
         simBtn.textContent = "⏻ Simulate offline";
       }, 8000);
     });
+  }
+
+  // -----------------------------------------------------------
+  // 6b. Live DTG (Date-Time Group) clock in the telemetry strip
+  //     Format: DDHHMMZ MMM YY  →  261430ZAPR26
+  //     Always Zulu (UTC), always uppercase, always tabular-nums.
+  // -----------------------------------------------------------
+  const dtgEl = document.getElementById("dtg");
+  if (dtgEl) {
+    const MONTHS = ["JAN","FEB","MAR","APR","MAY","JUN",
+                    "JUL","AUG","SEP","OCT","NOV","DEC"];
+    const pad2 = (n) => String(n).padStart(2, "0");
+    function tickDTG() {
+      const d = new Date();
+      const day  = pad2(d.getUTCDate());
+      const hh   = pad2(d.getUTCHours());
+      const mm   = pad2(d.getUTCMinutes());
+      const mon  = MONTHS[d.getUTCMonth()];
+      const yy   = pad2(d.getUTCFullYear() % 100);
+      dtgEl.textContent = `${day}${hh}${mm}Z${mon}${yy}`;
+    }
+    tickDTG();
+    setInterval(tickDTG, 1000);
   }
 
   // -----------------------------------------------------------
