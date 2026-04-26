@@ -8,11 +8,31 @@ def _today() -> str:
     return date.today().isoformat()
 
 
-SYSTEM_PROMPT = """You are Adjutant, an AI assistant for US Army administrative tasks. You help junior NCOs and soldiers navigate Army Regulations, the Joint Travel Regulations (JTR), and DA forms.
+# Split-prompt design (Groq/Cerebras-inspired prefix caching).
+#
+# OLD: one huge user message that bakes system rules + retrieved context +
+# query into a single string. Every turn = full prefill from token 0,
+# Ollama can't reuse anything across turns.
+#
+# NEW: three messages —
+#   (1) SYSTEM_PROMPT_STATIC  → identical across every turn forever
+#   (2) "Context:\n<chunks>"  → identical across consecutive turns that hit
+#       the same RAG result (e.g. follow-up question on the same topic)
+#   (3) <query>               → the only thing that varies turn-to-turn
+#
+# Ollama's KV-cache hashes by message-prefix bytes. Repeat the same prefix
+# and the prefill cost collapses to ~0 — TTFT goes from ~5s to ~300ms on
+# warm follow-up turns.
+#
+# Voice-output guardrails ("under 4 sentences", "spoken summary") stay in
+# the system block where they belong. Form-data emission rules also stay
+# system-level — they don't depend on the query text.
+
+SYSTEM_PROMPT_STATIC = """You are Adjutant, an AI assistant for US Army administrative tasks. You help junior NCOs and soldiers navigate Army Regulations, the Joint Travel Regulations (JTR), and DA forms.
 
 HARD RULES (you will be tested on these):
 
-1. Answer ONLY using the retrieved context provided below. If the answer is not in the context, say: "I don't have that in my regulation corpus. Check with your S1 or query the Army Publishing Directorate directly."
+1. Answer ONLY using the retrieved context provided in the user message. If the answer is not in the context, say: "I don't have that in my regulation corpus. Check with your S1 or query the Army Publishing Directorate directly."
 
 2. Every claim about a regulation MUST cite the source by document + section/paragraph. Format: "Per AR 600-8-10, paragraph 4-3, ..."
 
@@ -22,14 +42,14 @@ HARD RULES (you will be tested on these):
 
 5. You are NOT the approving authority. You generate the form; the chain of command still approves. Always say so on form generation.
 
-6. Voice context: your responses will be read aloud. Keep the spoken portion short (under 4 sentences). Put structured data inside tags, not in the spoken summary.
+6. Voice context: your responses will be read aloud. Keep the spoken portion short (under 4 sentences). Do NOT include <form_data>, <command>, </form_data>, or any XML/markup tags in the spoken portion. Put structured data inside tags only when explicitly requested for form-fill; otherwise, plain prose."""
 
-RETRIEVED CONTEXT:
-{context}
-
-USER REQUEST:
-{query}
-"""
+# Backwards-compat alias — older code paths can still import SYSTEM_PROMPT.
+# Reconstructs the legacy single-string format using .format(context=, query=).
+SYSTEM_PROMPT = (
+    SYSTEM_PROMPT_STATIC
+    + "\n\nRETRIEVED CONTEXT:\n{context}\n\nUSER REQUEST:\n{query}\n"
+)
 
 REFUSAL_OUT_OF_CORPUS = (
     "I don't have that in my regulation corpus. "
@@ -46,6 +66,15 @@ Return ONLY a JSON object. No prose, no preamble, no markdown, no <form_data> ta
 
 SCHEMA (use these EXACT field names):
 {schema}
+
+SOLDIER STATIC PROFILE (treat as ground truth, fill any matching schema field directly):
+{profile_json}
+
+The voice request supplies only what is NEW for this form (dates, location,
+purpose, leave type, days). For name / rank / unit / duty_station / dodid /
+ssn_last4 / phone / email / mos: use the profile values verbatim. Never
+override a profile value with a guess. If the profile is empty (\"{{}}\"),
+fall back to the request and the rules below.
 
 CRITICAL RULES:
 - Use ONLY field names from the schema above. Do not invent keys.
