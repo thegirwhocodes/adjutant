@@ -137,6 +137,10 @@ function ensureAudioCtx() {
 }
 
 async function playWavChunk(arrayBuffer) {
+  // Drop chunks that arrive during the post-barge-in muzzle window so the
+  // bot shuts up immediately when the user starts speaking again.
+  if (performance.now() < dropAudioUntil) return;
+
   const ctx = ensureAudioCtx();
   let buf;
   try {
@@ -182,6 +186,17 @@ function stopAllAudio() {
   }
   activeSources.clear();
   if (audioCtx) nextStartTime = audioCtx.currentTime;
+}
+
+// Persistent-listen barge-in. When the user starts speaking, we drop any
+// inbound WAV chunks for a short window — otherwise the server's already-
+// buffered audio keeps streaming for ~300 ms after we cancel locally and
+// the bot "stutters off" instead of shutting up cleanly. Window resets
+// whenever the user starts speaking again.
+let dropAudioUntil = 0;
+function muzzleBot(ms = 700) {
+  dropAudioUntil = performance.now() + ms;
+  stopAllAudio();
 }
 
 // ---------------------------------------------------------------------------
@@ -511,6 +526,13 @@ function cleanup() {
 function handleEvent(ev) {
   switch (ev.type) {
     case "USER_SPEAKING_START":
+      // Persistent-listen barge-in. The mic stays open for the entire
+      // session; whenever the server's VAD detects new user speech, we
+      // muzzle any in-flight bot audio immediately (don't wait for the
+      // server's INTERRUPT round-trip — that's another ~300ms of stutter).
+      if (currentState === "speaking" || currentState === "thinking") {
+        muzzleBot();
+      }
       setState("speaking_user");
       transcriptEl.textContent = "(hearing you…)";
       break;
@@ -535,6 +557,8 @@ function handleEvent(ev) {
     case "BOT_SPEAKING_END":
       spokenEl.textContent = ev.spoken_summary || "";
       // Wait until queued audio finishes, then go listening.
+      // Persistent-listen contract: after every bot turn we drop straight
+      // back to listening — no Start-button press needed between turns.
       const waitForAudio = () => {
         if (audioCtx && audioCtx.currentTime < nextStartTime) {
           setTimeout(waitForAudio, 100);
@@ -548,7 +572,9 @@ function handleEvent(ev) {
       renderPdf(ev);
       break;
     case "INTERRUPT":
-      stopAllAudio();
+      // Server-confirmed barge-in. Already muzzled on USER_SPEAKING_START;
+      // this is the redundant safety net for state-only barges.
+      muzzleBot();
       setState("speaking_user");
       break;
     case "ERROR":
