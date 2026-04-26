@@ -265,75 +265,83 @@ function startOrb() {
     const t = (now || performance.now()) * 0.001;
     const w = canvas.width, h = canvas.height;
     const cx = w / 2, cy = h / 2;
-    const R  = Math.min(w, h) * 0.42;
+    const R  = Math.min(w, h) * 0.34;   // contained disc, not a flashlight halo
 
     const s = STATES[currentState] || STATES.idle;
 
-    // Drive amplitude from whichever side is active
     const micLvl = (currentState === "listening" || currentState === "speaking_user")
                    ? vocalLevel(micAnalyser, micBuf) : 0;
     const botLvl = (currentState === "speaking") ? vocalLevel(botAnalyser, botBuf) : 0;
     const live = Math.max(micLvl, botLvl);
 
-    // Synthetic breathing — only in states without live audio (idle/thinking)
     const breath = (Math.sin(t * 1.4) * 0.5 + 0.5);
     const target = live > 0 ? live : (s.pulseMax * breath);
     const amp = tickEnv(target);
 
+    // Disc radius — gentle pulse, never balloons past the bounding box
+    const wobble = Math.sin(t * s.speed) * 0.012;
+    const r = R * (s.pulseMin + wobble + amp * s.pulseMax * 0.5);
+
     ctx2d.clearRect(0, 0, w, h);
 
-    // Soft warm vignette behind the orb (matches the page's amber bias)
-    const vg = ctx2d.createRadialGradient(cx, cy, 0, cx, cy, R * 1.7);
-    vg.addColorStop(0,    hexToRGBA(s.c[0], 0.06));
-    vg.addColorStop(0.55, hexToRGBA(s.c[0], 0.02));
-    vg.addColorStop(1,    "rgba(0,0,0,0)");
-    ctx2d.fillStyle = vg;
-    ctx2d.fillRect(0, 0, w, h);
+    // ChatGPT-style: a clean defined disc with an interior watercolor wash.
+    // Hard edge, premium feel. No additive bloom, no outer halo flashlight.
+    ctx2d.save();
+    ctx2d.beginPath();
+    ctx2d.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx2d.clip();
 
-    // Three concentric layers — additive blending so overlaps brighten
-    const baseScale = [1.00, 0.85, 0.70];
-    const phaseOff  = [0.0, 1.7, 3.4];
-    const dir       = [1, -1, 1];
+    // 1. Base fill — the disc's primary color
+    ctx2d.fillStyle = s.c[1];
+    ctx2d.fillRect(cx - r, cy - r, r * 2, r * 2);
 
-    ctx2d.globalCompositeOperation = "lighter";
-    for (let i = 0; i < 3; i++) {
-      const wobble = Math.sin(t * s.speed + phaseOff[i]) * 0.025 * dir[i];
-      const r = R * baseScale[i] * (s.pulseMin + wobble + amp * s.pulseMax);
-      const c = s.c[i];
-
-      const g = ctx2d.createRadialGradient(cx, cy, 0, cx, cy, r);
-      g.addColorStop(0.00, hexToRGBA(c, 0.00));   // hollow center (fresnel)
-      g.addColorStop(0.45, hexToRGBA(c, 0.05 + amp * 0.10));
-      g.addColorStop(0.78, hexToRGBA(c, 0.18 + amp * 0.18));
-      g.addColorStop(0.95, hexToRGBA(c, 0.42 + amp * 0.28));
-      g.addColorStop(1.00, hexToRGBA(c, 0.00));
+    // 2. Three drifting wash blobs — different colors, different speeds, all
+    //    inside the clipped disc. Creates the watercolor cloud effect.
+    const blobs = [
+      { color: s.c[0], speed: 0.18, phase: 0.0, sizeMul: 0.95 },
+      { color: s.c[2], speed: 0.23, phase: 2.1, sizeMul: 0.85 },
+      { color: s.c[0], speed: 0.31, phase: 4.7, sizeMul: 0.70 },
+    ];
+    for (const b of blobs) {
+      const ph = t * b.speed + b.phase;
+      const ox = Math.sin(ph) * r * 0.35;
+      const oy = Math.cos(ph * 0.7) * r * 0.35;
+      const br = r * b.sizeMul * (1 + Math.sin(ph * 1.3) * 0.1 + amp * 0.15);
+      const g = ctx2d.createRadialGradient(cx + ox, cy + oy, 0, cx + ox, cy + oy, br);
+      g.addColorStop(0,    hexToRGBA(b.color, 0.55 + amp * 0.20));
+      g.addColorStop(0.65, hexToRGBA(b.color, 0.20));
+      g.addColorStop(1,    hexToRGBA(b.color, 0));
       ctx2d.fillStyle = g;
-      ctx2d.beginPath();
-      ctx2d.arc(cx, cy, r, 0, Math.PI * 2);
-      ctx2d.fill();
+      ctx2d.fillRect(cx - r, cy - r, r * 2, r * 2);
     }
 
-    // Bright off-center core highlight — chromatic-aberration analog
-    ctx2d.globalCompositeOperation = "screen";
-    const hgr = ctx2d.createRadialGradient(
-      cx - R * 0.18, cy - R * 0.22, 0,
-      cx - R * 0.18, cy - R * 0.22, R * 0.55
-    );
-    hgr.addColorStop(0,    hexToRGBA(s.c[2], 0.18 + amp * 0.10));
-    hgr.addColorStop(0.55, hexToRGBA(s.c[2], 0.04));
-    hgr.addColorStop(1,    "rgba(0,0,0,0)");
-    ctx2d.fillStyle = hgr;
-    ctx2d.fillRect(0, 0, w, h);
+    // 3. Top-down brightening — like ChatGPT's lighter cloudy top
+    const lift = ctx2d.createLinearGradient(cx, cy - r, cx, cy + r);
+    lift.addColorStop(0,    hexToRGBA(s.c[2], 0.45));
+    lift.addColorStop(0.45, hexToRGBA(s.c[2], 0.10));
+    lift.addColorStop(1,    hexToRGBA(s.c[2], 0));
+    ctx2d.fillStyle = lift;
+    ctx2d.fillRect(cx - r, cy - r, r * 2, r * 2);
 
-    // Outer glow — soft halo extending past the sphere's edge
-    ctx2d.globalCompositeOperation = "lighter";
-    const og = ctx2d.createRadialGradient(cx, cy, R * 0.95, cx, cy, R * 1.35);
-    og.addColorStop(0, hexToRGBA(s.c[0], 0.08 + amp * 0.10));
-    og.addColorStop(1, "rgba(0,0,0,0)");
-    ctx2d.fillStyle = og;
-    ctx2d.fillRect(0, 0, w, h);
+    // 4. Inner edge darken — gives the disc a subtle 3D feel without halo
+    const edge = ctx2d.createRadialGradient(cx, cy, r * 0.85, cx, cy, r);
+    edge.addColorStop(0, "rgba(0,0,0,0)");
+    edge.addColorStop(1, "rgba(0,0,0,0.18)");
+    ctx2d.fillStyle = edge;
+    ctx2d.fillRect(cx - r, cy - r, r * 2, r * 2);
 
-    ctx2d.globalCompositeOperation = "source-over";
+    ctx2d.restore();
+
+    // 5. A whisper of an outer glow — 4% opacity, just enough to hint at
+    //    bleed without the flashlight effect. Drops to 0 at idle.
+    if (currentState !== "idle" && currentState !== "muted") {
+      const og = ctx2d.createRadialGradient(cx, cy, r, cx, cy, r * 1.18);
+      og.addColorStop(0, hexToRGBA(s.c[0], 0.04 + amp * 0.04));
+      og.addColorStop(1, "rgba(0,0,0,0)");
+      ctx2d.fillStyle = og;
+      ctx2d.fillRect(0, 0, w, h);
+    }
+
     orbRafHandle = requestAnimationFrame(render);
   }
   orbRafHandle = requestAnimationFrame(render);
