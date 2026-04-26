@@ -1,17 +1,32 @@
 """Populate a blank DA / DD form PDF with extracted field values.
 
-Two strategies, tried in order:
+Three strategies, each correct for a different kind of source PDF:
 
-  1. AcroForm field-fill via pikepdf  — for true-fillable PDFs (most DD
-     forms, some Army forms).
-  2. Reportlab overlay merge          — for XFA forms and flat scans
-     (the DA-31 from armypubs.army.mil ships as XFA, no AcroForm fields).
+  1. **rect-overlay**  (DD-1351-2) — the source PDF is a real AcroForm with
+     widget rectangles, but the values written via pikepdf don't render in
+     non-Adobe viewers because their appearance streams aren't regenerated.
+     We sidestep that entirely by drawing the values directly into the
+     extracted widget rectangles via reportlab, then merging the overlay
+     onto the original form. The resulting PDF renders in Chrome, Preview,
+     pypdfium2, every browser PDF viewer.
 
-Strategy 2 uses a hand-tuned coordinate map per form. Coordinates are
-in PDF points (1pt = 1/72 inch), origin bottom-left.
+  2. **flat-rebuild** (DA-31, DA-4856) — armypubs ships these as XFA-only
+     PDFs whose page contents are nothing but a "Please wait..." loading
+     stub. Non-Adobe viewers can't render the form at all. We give up on
+     using the source PDF as a base and draw the form from scratch with
+     reportlab — boxes, labels, signature lines, the works — then fill it.
+
+  3. **acroform-fill** (fallback, never used by the demo) — for any future
+     PDF that's a real AcroForm with proper appearance streams. Kept so
+     the rest of the codebase doesn't break if the schema lists a PDF we
+     haven't manually classified.
+
+A soldier downloading any of these PDFs can print, sign, and route them
+through their chain of command. That's the contract.
 """
 
 import io
+import json
 import logging
 from pathlib import Path
 
@@ -21,99 +36,23 @@ from reportlab.pdfgen import canvas
 
 log = logging.getLogger("adjutant.pdf_fill")
 
-
-# ---------------------------------------------------------------------------
-# Coordinate maps for the overlay strategy. Tuned by eyeballing the official
-# DA-31 / DD-1351-2 / DA-4856 layouts. Refine during demo rehearsal.
-# Page indices are 0-based. Coordinates: (x, y) in PDF points from
-# bottom-left corner. Each form is US letter (612 x 792 pt).
-# ---------------------------------------------------------------------------
-
-# DA-31 — Request and Authority for Leave (June 2020 revision)
-# Block layout reference:
-#   - Box 1: TYPE (block 1) at top, name + grade left
-#   - Box 4: NAME (LAST, FIRST, MI)
-#   - Box 5: SSN
-#   - Box 6: GRADE / RANK
-#   - Box 7a: dates from
-#   - Box 7b: dates to
-#   - Box 8: number of days
-#   - Box 11: ORG/STATION
-#   - Box 12: leave address
-#   - Box 13: telephone
-DA_31_OVERLAY = {
-    0: {
-        "name":              {"x":  90, "y": 668, "size": 10},
-        "ssn":               {"x": 320, "y": 668, "size": 10},
-        "rank":              {"x": 470, "y": 668, "size": 10},
-        "leave_type":        {"x":  60, "y": 700, "size":  9, "prefix": "X "},
-        "start_date":        {"x":  90, "y": 632, "size": 10},
-        "end_date":          {"x": 230, "y": 632, "size": 10},
-        "days_requested":    {"x": 360, "y": 632, "size": 10},
-        "unit":              {"x":  90, "y": 596, "size": 10},
-        "leave_address":     {"x":  90, "y": 558, "size": 10},
-        "leave_phone":       {"x":  90, "y": 522, "size": 10},
-        "emergency_contact": {"x": 320, "y": 522, "size": 10},
-    }
-}
-
-# DD-1351-2 — Travel Voucher (3-page form)
-DD_1351_2_OVERLAY = {
-    0: {
-        "name":            {"x":  90, "y": 700, "size": 10},
-        "ssn":             {"x": 380, "y": 700, "size": 10},
-        "rank":            {"x":  90, "y": 670, "size": 10},
-        "duty_station":    {"x":  90, "y": 640, "size": 10},
-        "purpose":         {"x":  90, "y": 580, "size":  9},
-        "tdy_location":    {"x":  90, "y": 540, "size": 10},
-        "depart_date":     {"x": 380, "y": 540, "size": 10},
-        "return_date":     {"x": 480, "y": 540, "size": 10},
-        "total_days":      {"x":  90, "y": 500, "size": 10},
-        "lodging_per_day": {"x": 220, "y": 500, "size": 10},
-        "mie_per_day":     {"x": 320, "y": 500, "size": 10},
-        "estimated_total": {"x": 460, "y": 500, "size": 10, "prefix": "$"},
-    }
-}
-
-# DA-4856 — Developmental Counseling Form
-DA_4856_OVERLAY = {
-    0: {
-        "name":             {"x":  90, "y": 720, "size": 10},
-        "rank":             {"x": 380, "y": 720, "size": 10},
-        "date":             {"x": 480, "y": 720, "size": 10},
-        "counselor_name":   {"x":  90, "y": 690, "size": 10},
-        "counselor_rank":   {"x": 380, "y": 690, "size": 10},
-        "counseling_type":  {"x":  90, "y": 660, "size":  9},
-        "purpose":          {"x":  90, "y": 600, "size":  9},
-        "key_points":       {"x":  90, "y": 480, "size":  9},
-        "plan_of_action":   {"x":  90, "y": 320, "size":  9},
-    }
-}
-
-OVERLAY_MAPS = {
-    "da_31_blank.pdf":     DA_31_OVERLAY,
-    "dd_1351_2_blank.pdf": DD_1351_2_OVERLAY,
-    "da_4856_blank.pdf":   DA_4856_OVERLAY,
-}
-
+PAGE_W, PAGE_H = letter   # 612, 792
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
-def fill_pdf(template_path: str, data: dict, output_path: str, schema: dict | None = None) -> str:
-    """Fill a DA/DD form PDF with the given field values.
+def fill_pdf(template_path: str, data: dict, output_path: str,
+             schema: dict | None = None) -> str:
+    """Render a filled form PDF for `data` using the right strategy for
+    the given template. Returns output_path on success.
 
-    Args:
-        template_path: blank PDF
-        data: {semantic_field_name: value} from the LLM
-        output_path: where to write the filled PDF
-        schema: optional registry entry for the form. If provided AND its
-            fields contain "pdf_field" entries, we translate semantic names
-            into the form's actual AcroForm field names before writing.
+    Strategy is dispatched by template filename. Adding a new form means:
+      - drop the blank PDF in forms/
+      - add an entry to STRATEGY below
+      - if it's flat-rebuild, write a builder function
 
-    Tries AcroForm fill first; falls back to reportlab overlay merge if the
-    PDF has no fillable fields (XFA-only or flat scan).
+    `data` is keyed by *semantic* field names (see adjutant/forms.py).
     """
     template = Path(template_path)
     if not template.exists():
@@ -121,157 +60,770 @@ def fill_pdf(template_path: str, data: dict, output_path: str, schema: dict | No
             f"Blank PDF not found: {template_path}. "
             f"Run: python scripts/download_corpus.py"
         )
-
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
 
-    # Translate semantic names -> actual PDF field names if the schema tells us how.
-    if schema and "fields" in schema:
-        translated = {}
-        for sem_name, value in data.items():
-            spec = schema["fields"].get(sem_name, {})
-            pdf_name = spec.get("pdf_field") if isinstance(spec, dict) else None
-            if pdf_name:
-                translated[pdf_name] = value
-            else:
-                # Keep the semantic name as fallback (works for forms whose
-                # AcroForm field names already match our schema keys).
-                translated[sem_name] = value
-        data = translated
+    # Normalize None / "null"-ish values to empty string up front.
+    str_data = {
+        k: ("" if v is None else str(v))
+        for k, v in (data or {}).items()
+    }
 
-    str_data = {k: ("" if v is None else str(v)) for k, v in data.items()}
+    handler = STRATEGY.get(template.name, _strategy_acroform)
+    return handler(template, str_data, out, schema)
 
-    # Strategy 1: AcroForm fill.
-    n_filled = _try_acroform_fill(template, str_data, out)
-    if n_filled > 0:
-        log.info(f"Filled {n_filled} AcroForm fields in {template.name} → {out.name}")
-        return str(out)
 
-    # Strategy 2: overlay (XFA / flat-scan fallback).
-    log.info(f"{template.name} has no AcroForm fields — using reportlab overlay")
-    n_overlaid = _overlay_fill(template, str_data, out)
-    log.info(f"Overlaid {n_overlaid} values onto {template.name} → {out.name}")
+# ---------------------------------------------------------------------------
+# Strategy 1 — rect-overlay (DD-1351-2)
+# ---------------------------------------------------------------------------
+
+def _load_widgets(name: str) -> dict:
+    """Load the cached widget-rect JSON next to a blank PDF. Each entry is
+    `{"page": int, "rect": [x0,y0,x1,y1], "type": "/Tx"|"/Btn"|...}`.
+    Generated by scripts/extract_widget_rects.py.
+    """
+    path = Path(f"forms/{name}_widgets.json")
+    if not path.exists():
+        log.warning(f"widget map missing: {path}")
+        return {}
+    return json.loads(path.read_text())
+
+
+# Map semantic field names → DD-1351-2 PDF widget names. Source: extracted
+# from the actual blank in forms/dd_1351_2_widgets.json.
+DD_1351_2_FIELDS = {
+    "name":             "two[0]",
+    "rank":             "three[0]",
+    "ssn":              "four_specify[0]",
+    "duty_station":     "sixA[0]",
+    "duty_city":        "sixB[0]",
+    "duty_state":       "sixC[0]",
+    "duty_zip":         "sixD[0]",
+    "email":            "sixE[0]",
+    "travel_orders":    "seven[0]",
+    "orders_date":      "eight[0]",
+    "unit":             "eleven[0]",
+    "purpose":          "fifteen_reason_line2[0]",
+    "tdy_location":     "fifteen_place_line1[0]",
+    "depart_date":      "fifteen_dep_date_line1[0]",
+    "return_date":      "fifteen_arr_date_line2[0]",
+    "lodging_per_day":  "fifteen_lodging_line2[0]",
+    "estimated_total":  "twenty7[0]",   # "amount paid" block
+}
+# Checkboxes — "/Y" turns them on, anything else off.
+DD_1351_2_CHECKS = {
+    "tdy":      "five_TDY[0]",
+    "pcs":      "five_PCS[0]",
+    "eft":      "one_EFT[0]",
+    "check":    "one_paymentByCheck[0]",
+}
+
+
+def _fill_dd_1351_2(template: Path, data: dict, out: Path,
+                    schema: dict | None) -> str:
+    widgets = _load_widgets("dd_1351_2")
+    if not widgets:
+        log.warning("DD-1351-2: no widget map, falling back to AcroForm fill")
+        return _strategy_acroform(template, data, out, schema)
+
+    # Build per-page text-draw instructions: page_idx -> [(x, y, text, size)]
+    n_pages = max((w["page"] for w in widgets.values()), default=0) + 1
+    by_page: dict[int, list[tuple[float, float, str, float]]] = {p: [] for p in range(n_pages)}
+
+    # 1. Text fields keyed by semantic name
+    for sem_name, value in data.items():
+        if not value:
+            continue
+        wname = DD_1351_2_FIELDS.get(sem_name)
+        if not wname:
+            continue
+        w = widgets.get(wname)
+        if not w:
+            continue
+        x0, y0, x1, y1 = w["rect"]
+        # Vertically center text in the rect; left-pad 2pt.
+        size = _fit_size(value, x1 - x0, y1 - y0, default=10)
+        x = x0 + 2
+        y = y0 + (y1 - y0 - size) / 2 + 1
+        by_page[w["page"]].append((x, y, str(value), size))
+
+    # 2. Checkboxes — paint a clean "X" inside the box.
+    for sem, _ in DD_1351_2_CHECKS.items():
+        if data.get(sem) in ("/Y", "X", "true", "True", "yes", "Yes", "1"):
+            wname = DD_1351_2_CHECKS[sem]
+            w = widgets.get(wname)
+            if not w:
+                continue
+            x0, y0, x1, y1 = w["rect"]
+            cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+            size = max(8, int((y1 - y0) * 0.85))
+            by_page[w["page"]].append((cx - size * 0.25, cy - size * 0.32, "X", size))
+
+    # Default: assume TDY checked unless caller specified otherwise.
+    if not any(data.get(k) for k in DD_1351_2_CHECKS):
+        w = widgets.get(DD_1351_2_CHECKS["tdy"])
+        if w:
+            x0, y0, x1, y1 = w["rect"]
+            cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+            size = max(8, int((y1 - y0) * 0.85))
+            by_page[w["page"]].append((cx - size * 0.25, cy - size * 0.32, "X", size))
+
+    overlay_bytes = _build_multi_page_overlay(by_page, n_pages)
+    n_drawn = sum(len(v) for v in by_page.values())
+
+    with pikepdf.open(str(template)) as base, \
+         pikepdf.open(io.BytesIO(overlay_bytes)) as ov:
+        for pi, page in enumerate(base.pages):
+            if pi < len(ov.pages):
+                page.add_overlay(ov.pages[pi])
+        # Strip the AcroForm widgets so the values we just drew aren't
+        # competing with empty boxes (some renderers draw the widget
+        # outline on top of our overlay).
+        if "/AcroForm" in base.Root:
+            try:
+                del base.Root.AcroForm.Fields
+            except Exception:
+                pass
+        base.save(str(out))
+
+    log.info(f"DD-1351-2 filled {n_drawn} fields → {out.name}")
     return str(out)
 
 
 # ---------------------------------------------------------------------------
-# Strategy 1: AcroForm field-fill via pikepdf
+# Strategy 2 — flat-rebuild (DA-31, DA-4856)
 # ---------------------------------------------------------------------------
 
-def _try_acroform_fill(template: Path, data: dict, out: Path) -> int:
-    """Attempt to fill AcroForm fields. Returns count filled (0 if no AcroForm)."""
-    n_filled = 0
-    fields_seen: list[str] = []
+def _build_da_31(data: dict, out: Path) -> str:
+    """Build a flat DA-31 (Request and Authority for Leave) from scratch.
 
-    with pikepdf.open(str(template)) as pdf:
-        if "/AcroForm" not in pdf.Root or "/Fields" not in pdf.Root.AcroForm:
-            return 0
-
-        def walk(field):
-            nonlocal n_filled
-            if "/Kids" in field:
-                for kid in field.Kids:
-                    walk(kid)
-                return
-            name = str(field.T) if "/T" in field else None
-            if name is None:
-                return
-            fields_seen.append(name)
-            if name in data:
-                value = data[name]
-                ft = field.get("/FT")
-                if ft == "/Btn":
-                    field.V = pikepdf.Name("/" + value) if value else pikepdf.Name("/Off")
-                else:
-                    field.V = pikepdf.String(value)
-                n_filled += 1
-
-        if len(pdf.Root.AcroForm.Fields) == 0:
-            return 0
-        for top_field in pdf.Root.AcroForm.Fields:
-            walk(top_field)
-
-        if n_filled == 0:
-            return 0
-
-        pdf.Root.AcroForm.NeedAppearances = True
-        pdf.save(str(out))
-
-    return n_filled
-
-
-# ---------------------------------------------------------------------------
-# Strategy 2: reportlab overlay
-# ---------------------------------------------------------------------------
-
-def _build_overlay(field_map: dict, data: dict) -> bytes:
-    """Build a single-page (or multi-page) overlay PDF with text drawn at the
-    coordinates in `field_map`. Returns raw PDF bytes.
-
-    field_map: {page_idx: {field_name: {"x": pt, "y": pt, "size": pt, "prefix": str?}}}
+    Source PDF from armypubs is XFA-only; non-Adobe viewers show only a
+    "Please wait..." stub. We render the form's structure ourselves so it
+    looks like the real DA-31 and prints anywhere.
     """
-    buf = io.BytesIO()
-    c = canvas.Canvas(buf, pagesize=letter)
-    c.setFillColorRGB(0.05, 0.05, 0.05)  # near-black
+    c = canvas.Canvas(str(out), pagesize=letter)
+    c.setStrokeColorRGB(0, 0, 0)
+    c.setFillColorRGB(0, 0, 0)
 
-    n_pages = max(field_map.keys()) + 1 if field_map else 1
+    # ---- header band -----------------------------------------------
+    c.setFont("Helvetica-Bold", 13)
+    c.drawCentredString(PAGE_W / 2, 760, "REQUEST AND AUTHORITY FOR LEAVE")
+    c.setFont("Helvetica", 8)
+    c.drawCentredString(PAGE_W / 2, 748,
+                         "For use of this form, see AR 600-8-10; the proponent agency is DCS, G-1.")
+    c.setFont("Helvetica", 7)
+    c.drawString(40, 736, "DA FORM 31 — adjutant.local rendering")
+    c.drawRightString(PAGE_W - 40, 736, "AR 600-8-10 — Leaves and Passes")
 
-    for page_idx in range(n_pages):
-        page_fields = field_map.get(page_idx, {})
-        for fname, spec in page_fields.items():
-            value = data.get(fname, "")
-            if not value:
-                continue
-            prefix = spec.get("prefix", "")
-            text = f"{prefix}{value}"
-            c.setFont("Helvetica", spec.get("size", 10))
-            # Wrap long strings (>60 chars) onto multi-line
-            if len(text) > 60:
-                _draw_wrapped(c, text, spec["x"], spec["y"], spec.get("size", 10))
-            else:
-                c.drawString(spec["x"], spec["y"], text)
-        c.showPage()
+    # ---- type panel ------------------------------------------------
+    _box(c, 40, 700, PAGE_W - 80, 26, label="1. TYPE")
+    types = ["ORDINARY", "EMERGENCY", "CONVALESCENT",
+             "PERMISSIVE TDY", "TERMINAL", "OTHER"]
+    chosen = (data.get("leave_type") or "Ordinary").upper()
+    if "PERMISSIVE" in chosen or "PTDY" in chosen:
+        chosen = "PERMISSIVE TDY"
+    col_w = (PAGE_W - 80) / len(types)
+    c.setFont("Helvetica", 9)
+    for i, t in enumerate(types):
+        x = 40 + i * col_w + 12
+        c.rect(x - 8, 707, 9, 9, stroke=1, fill=0)
+        if t == chosen:
+            c.setFont("Helvetica-Bold", 10)
+            c.drawString(x - 6, 709, "X")
+            c.setFont("Helvetica", 9)
+        c.drawString(x + 5, 709, t)
 
+    # ---- block 2/3/4: name / SSN / grade ---------------------------
+    _box(c, 40, 668, 290, 26, label="2. NAME (Last, First, Middle)")
+    _box(c, 330, 668, 110, 26, label="3. SSN / DOD ID")
+    _box(c, 440, 668, PAGE_W - 480, 26, label="4. RANK / GRADE")
+    c.setFont("Helvetica", 11)
+    c.drawString(46, 678, str(data.get("name", "")))
+    c.drawString(336, 678, str(data.get("ssn", "")))
+    c.drawString(446, 678, str(data.get("rank", "")))
+
+    # ---- block 5/6: dates from/to + days ---------------------------
+    _box(c, 40, 636, 180, 26, label="5a. DATES — FROM (YYYY-MM-DD)")
+    _box(c, 220, 636, 180, 26, label="5b. DATES — TO (YYYY-MM-DD)")
+    _box(c, 400, 636, PAGE_W - 440, 26, label="6. NUMBER OF DAYS")
+    c.setFont("Helvetica", 11)
+    c.drawString(46, 646, str(data.get("start_date", "")))
+    c.drawString(226, 646, str(data.get("end_date", "")))
+    c.drawString(406, 646, str(data.get("days_requested", "")))
+
+    # ---- block 7: organization / station ---------------------------
+    _box(c, 40, 600, PAGE_W - 80, 30, label="7. ORGANIZATION AND STATION (Home unit)")
+    c.setFont("Helvetica", 11)
+    c.drawString(46, 612, str(data.get("unit", "")))
+
+    # ---- block 8: leave address ------------------------------------
+    _box(c, 40, 552, PAGE_W - 80, 42, label="8. LEAVE ADDRESS (Where the soldier can be reached)")
+    addr = str(data.get("leave_address", ""))
+    c.setFont("Helvetica", 11)
+    _draw_wrapped_text(c, addr, 46, 575, max_chars=90, size=11)
+
+    # ---- block 9/10: phone / emergency contact ---------------------
+    _box(c, 40, 510, 250, 36, label="9. TELEPHONE WHILE ON LEAVE")
+    _box(c, 290, 510, PAGE_W - 330, 36, label="10. EMERGENCY POC (name + relationship + phone)")
+    c.setFont("Helvetica", 11)
+    c.drawString(46, 522, str(data.get("leave_phone", "")))
+    _draw_wrapped_text(c, str(data.get("emergency_contact", "")),
+                       296, 530, max_chars=60, size=10)
+
+    # ---- citation strip --------------------------------------------
+    c.setFont("Helvetica-Oblique", 8)
+    c.drawString(40, 488, "Cited authority:  AR 600-8-10 ¶ 4-3 — leave authorization & accrual.")
+
+    # ---- approving authority signature block -----------------------
+    _box(c, 40, 410, PAGE_W - 80, 60,
+         label="11. SIGNATURE OF SOLDIER  (electronic signature OK)  /  DATE")
+    _box(c, 40, 340, PAGE_W - 80, 60,
+         label="12. SIGNATURE OF APPROVING AUTHORITY  /  DATE")
+
+    # ---- footer ----------------------------------------------------
+    c.setFont("Helvetica", 7)
+    c.drawString(40, 60,
+                 "Generated by Adjutant — voice-first, fully offline. "
+                 "Soldier signs and routes through chain of command for approval.")
+    c.drawRightString(PAGE_W - 40, 60, "Page 1 of 1")
+
+    c.showPage()
     c.save()
-    return buf.getvalue()
+    return str(out)
 
 
-def _draw_wrapped(c, text: str, x: int, y: int, font_size: int) -> None:
-    """Crude word-wrap for long strings (e.g. counseling key_points)."""
-    width_chars = 70
-    line_height = font_size + 2
+def _build_da_4856(data: dict, out: Path) -> str:
+    """Build a flat DA-4856 (Developmental Counseling Form) from scratch."""
+    c = canvas.Canvas(str(out), pagesize=letter)
+    c.setStrokeColorRGB(0, 0, 0)
+    c.setFillColorRGB(0, 0, 0)
+
+    c.setFont("Helvetica-Bold", 13)
+    c.drawCentredString(PAGE_W / 2, 760, "DEVELOPMENTAL COUNSELING FORM")
+    c.setFont("Helvetica", 8)
+    c.drawCentredString(PAGE_W / 2, 748,
+                         "For use of this form, see ATP 6-22.1; the proponent agency is TRADOC.")
+    c.setFont("Helvetica", 7)
+    c.drawString(40, 736, "DA FORM 4856 — adjutant.local rendering")
+    c.drawRightString(PAGE_W - 40, 736, "AR 623-3 — Evaluation Reporting System")
+
+    # Section I — administrative data
+    _section(c, 712, "PART I — ADMINISTRATIVE DATA")
+
+    _box(c, 40, 668, 290, 30, label="NAME (Last, First, Middle) of person counseled")
+    _box(c, 330, 668, 100, 30, label="RANK / GRADE")
+    _box(c, 430, 668, PAGE_W - 470, 30, label="DATE OF COUNSELING")
+    c.setFont("Helvetica", 11)
+    c.drawString(46, 680, str(data.get("name", "")))
+    c.drawString(336, 680, str(data.get("rank", "")))
+    c.drawString(436, 680, str(data.get("date", "")))
+
+    _box(c, 40, 632, 290, 30, label="ORGANIZATION (counselee's unit)")
+    _box(c, 330, 632, PAGE_W - 370, 30, label="NAME AND TITLE OF COUNSELOR")
+    c.setFont("Helvetica", 11)
+    c.drawString(46, 644, str(data.get("unit", "")))
+    counselor = (
+        f"{data.get('counselor_rank','')} {data.get('counselor_name','')}".strip()
+    )
+    c.drawString(336, 644, counselor)
+
+    # Section II — purpose
+    _section(c, 608, "PART II — BACKGROUND INFORMATION")
+    _box(c, 40, 552, PAGE_W - 80, 50,
+         label="PURPOSE OF COUNSELING (event-oriented · performance · separation · referral)")
+    _draw_wrapped_text(c, str(data.get("purpose", "")), 46, 580, max_chars=90, size=11)
+
+    # Section III — key points of discussion
+    _section(c, 528, "PART III — SUMMARY OF COUNSELING")
+    _box(c, 40, 360, PAGE_W - 80, 160,
+         label="KEY POINTS OF DISCUSSION")
+    _draw_wrapped_text(c, str(data.get("key_points", "")),
+                       46, 500, max_chars=88, size=10, line_height=14)
+
+    # Section IV — plan of action
+    _box(c, 40, 230, PAGE_W - 80, 120,
+         label="PLAN OF ACTION (specific, measurable, achievable, relevant, timed)")
+    _draw_wrapped_text(c, str(data.get("plan_of_action", "")),
+                       46, 332, max_chars=88, size=10, line_height=14)
+
+    # Signature blocks
+    _box(c, 40, 160, (PAGE_W - 80) / 2 - 10, 50,
+         label="SIGNATURE OF COUNSELEE  /  DATE")
+    _box(c, 40 + (PAGE_W - 80) / 2 + 10, 160, (PAGE_W - 80) / 2 - 10, 50,
+         label="SIGNATURE OF COUNSELOR  /  DATE")
+
+    c.setFont("Helvetica-Oblique", 8)
+    c.drawString(40, 130, "Cited authority:  AR 623-3 — Evaluation Reporting System.")
+
+    c.setFont("Helvetica", 7)
+    c.drawString(40, 60,
+                 "Generated by Adjutant — voice-first, fully offline. "
+                 "Both parties sign and the original is kept in the soldier's file.")
+    c.drawRightString(PAGE_W - 40, 60, "Page 1 of 1")
+
+    c.showPage()
+    c.save()
+    return str(out)
+
+
+def _strategy_da_31(template: Path, data: dict, out: Path,
+                    schema: dict | None) -> str:
+    # Engine priority: Aspose (if env var set) → XFA-layout reportlab → hand-coded.
+    if _aspose_available() and _try_aspose_fill(template, data, out, DA_31_SEMANTIC):
+        return str(out)
+    layout_path = Path("forms/da_31_layout.json")
+    if layout_path.exists():
+        log.info(f"DA-31 xfa-layout-driven → {out.name}")
+        _render_xfa_layout(layout_path, data, out, semantic_to_xfa=DA_31_SEMANTIC)
+        return str(out)
+    log.info(f"DA-31 hand-coded fallback → {out.name}")
+    return _build_da_31(data, out)
+
+
+def _strategy_da_4856(template: Path, data: dict, out: Path,
+                      schema: dict | None) -> str:
+    if _aspose_available() and _try_aspose_fill(template, data, out, DA_4856_SEMANTIC):
+        return str(out)
+    layout_path = Path("forms/da_4856_layout.json")
+    if layout_path.exists():
+        log.info(f"DA-4856 xfa-layout-driven → {out.name}")
+        _render_xfa_layout(layout_path, data, out, semantic_to_xfa=DA_4856_SEMANTIC)
+        return str(out)
+    log.info(f"DA-4856 hand-coded fallback → {out.name}")
+    return _build_da_4856(data, out)
+
+
+# ---------------------------------------------------------------------------
+# Strategy 1.5 — Aspose.PDF for Python (commercial XFA renderer)
+#
+# Activates ONLY when ADJUTANT_USE_ASPOSE=1 is set. If ASPOSE_LICENSE_PATH
+# also points to a valid .lic file we apply it (no watermark). Without a
+# license we ship the eval-mode watermarked output — useful for verifying
+# the engine works while waiting for the temp-license email.
+#
+# Why bother shipping both? Aspose renders dynamic XFA using Adobe-quality
+# code, so when (a) the temp license arrives, or (b) we need pixel-perfect
+# output for a specific demo, we flip the env var and the same call site
+# upgrades automatically without the rest of the pipeline noticing.
+# ---------------------------------------------------------------------------
+
+def _aspose_available() -> bool:
+    """Honor ADJUTANT_USE_ASPOSE=1 env. Default off so the demo doesn't
+    accidentally ship watermarked output."""
+    import os
+    if os.getenv("ADJUTANT_USE_ASPOSE") not in ("1", "true", "yes"):
+        return False
+    try:
+        import aspose.pdf  # noqa: F401
+        return True
+    except ImportError:
+        log.warning("ADJUTANT_USE_ASPOSE set but aspose-pdf not installed; skipping")
+        return False
+
+
+def _try_aspose_fill(template: Path, data: dict, out: Path,
+                     semantic_to_xfa: dict) -> bool:
+    """Fill via Aspose.PDF. Returns True on success, False on any error
+    so the caller can fall through to the next strategy."""
+    import os
+    try:
+        import aspose.pdf as ap
+    except ImportError:
+        return False
+
+    try:
+        # Apply the license file if one is configured. Without it Aspose
+        # writes its eval watermark on every page.
+        lic_path = os.getenv("ASPOSE_LICENSE_PATH")
+        if lic_path and Path(lic_path).exists():
+            try:
+                ap.License().set_license(lic_path)
+                log.info(f"aspose: license applied ({lic_path})")
+            except Exception as e:
+                log.warning(f"aspose: license rejected: {e}")
+
+        with ap.Document(str(template)) as doc:
+            # Translate semantic keys → XFA names.
+            xfa_data = {semantic_to_xfa.get(k, k): v for k, v in data.items()}
+
+            # Some XFA forms only expose AcroForm fields once we flip the
+            # type. Try to set values via the XFA model first, fall back
+            # to AcroForm field-fill if that fails.
+            n = 0
+            if doc.form.has_xfa:
+                try:
+                    doc.form.ignore_needs_rendering = True
+                except Exception:
+                    pass
+                xfa = doc.form.xfa
+                for name, value in xfa_data.items():
+                    if not value:
+                        continue
+                    try:
+                        xfa.set_field_value(name, str(value))
+                        n += 1
+                    except Exception:
+                        pass
+
+            # Convert dynamic XFA → static AcroForm so the output renders
+            # in non-Adobe viewers.
+            try:
+                doc.form.type = ap.forms.FormType.STANDARD
+            except Exception as e:
+                log.warning(f"aspose: form.type=STANDARD failed: {e}")
+
+            # If the XFA path didn't bind anything, try AcroForm fields.
+            if n == 0:
+                for fld in doc.form.fields:
+                    fname = getattr(fld, "full_name", None) or getattr(fld, "partial_name", "")
+                    base = fname.split(".")[-1] if fname else ""
+                    if base in xfa_data and xfa_data[base]:
+                        try:
+                            fld.value = str(xfa_data[base])
+                            n += 1
+                        except Exception:
+                            pass
+
+            doc.save(str(out))
+            log.info(f"aspose: filled {n} field(s) → {out.name}")
+            return True
+    except Exception as e:
+        log.warning(f"aspose fill failed ({e!r}) — falling through")
+        return False
+
+
+# ---------------------------------------------------------------------------
+# XFA-layout-driven renderer
+#
+# Walks the layout JSON produced by scripts/extract_xfa_template.py and
+# emits one reportlab page per XFA page, drawing every <draw>'s static
+# label and rule, then filling each <field>'s data from the user payload.
+# Output is a flat self-contained PDF that prints/renders in any viewer.
+# ---------------------------------------------------------------------------
+
+# Map our semantic field names → the actual XFA field names found in the
+# armypubs DA-31 template. Adjutant's LLM produces the keys on the left;
+# the layout JSON lists the keys on the right. Anything unmapped falls
+# through unchanged so a caller can pass an XFA name directly if they want.
+DA_31_SEMANTIC = {
+    "name":              "NAME",
+    "ssn":               "SSN",
+    "rank":              "POPUP2",
+    "unit":              "DEPUNIT",
+    "leave_address":     "ADDRESS",
+    "leave_phone":       "PHONE",
+    "emergency_contact": "POC",
+    "start_date":        "DEPDATE",
+    "end_date":          "RETDATE",
+    "days_requested":    "NUMDAYS",
+    "leave_type":        "TYPE",
+}
+
+# DA-4856 mapping. Field names extracted directly from forms/da_4856_layout.json
+# (see grep output: Name, Rank_Grade, Date_Counseling, Organization,
+# Name_Title_Counselor, Type_Counseling_*, Purpose_Counseling, etc.)
+DA_4856_SEMANTIC = {
+    "name":             "Name",
+    "rank":             "Rank_Grade",
+    "date":             "Date_Counseling",
+    "unit":             "Organization",
+    "counselor_name":   "Name_Title_Counselor",
+    "counselor_rank":   "Name_Title_Counselor",  # field combines name+title
+    "purpose":          "Purpose_Counseling",
+    "key_points":       "Key_Points_Discussion",
+    "plan_of_action":   "Plan_Action",
+    "session_closing":  "Session_Closing",
+    "leader_responsibilities": "Leader_Responsibilities",
+    "assessment":       "Assessment",
+}
+
+
+def _render_xfa_layout(layout_path: Path, data: dict, out: Path,
+                       semantic_to_xfa: dict) -> None:
+    """Render every <draw> + <field> from the extracted XFA layout, then
+    overlay user data into the named field rectangles."""
+    layout = json.loads(layout_path.read_text())
+    pages = layout.get("pages", [])
+
+    # Translate semantic data keys → XFA names so we can match by 'name'
+    # in the layout. Pass-through unknown keys.
+    xfa_data = {}
+    for k, v in data.items():
+        xfa_data[semantic_to_xfa.get(k, k)] = v
+
+    c = canvas.Canvas(str(out))
+    for page in pages:
+        page_w = page.get("width", PAGE_W)
+        page_h = page.get("height", PAGE_H)
+        c.setPageSize((page_w, page_h))
+        c.setStrokeColorRGB(0, 0, 0)
+        c.setFillColorRGB(0, 0, 0)
+
+        for item in page["items"]:
+            x, y = item["x"], item["y"]
+            w, h = item["w"], item["h"]
+            kind = item["kind"]
+
+            if item.get("rule"):
+                # Border / line / box. Draw as a thin stroked rect, or a
+                # horizontal line if h is near zero.
+                c.setLineWidth(0.5)
+                if h < 1.0 and w > 1.0:
+                    c.line(x, y + (h / 2), x + w, y + (h / 2))
+                elif w < 1.0 and h > 1.0:
+                    c.line(x + (w / 2), y, x + (w / 2), y + h)
+                else:
+                    c.rect(x, y, w, h, stroke=1, fill=0)
+                continue
+
+            if kind == "draw":
+                text = (item.get("value") or item.get("caption") or "").strip()
+                if not text:
+                    continue
+                _draw_wrapped_in_rect(
+                    c, text, x, y, w, h,
+                    font=item.get("font", "Helvetica"),
+                    size=item.get("size", 8),
+                    align=item.get("align", "left"),
+                )
+                continue
+
+            if kind == "field":
+                # Look up the user data by XFA name.
+                xname = item.get("name", "")
+                value = xfa_data.get(xname)
+                if value is None or value == "":
+                    # Empty field — still draw the slot border so the form
+                    # looks complete and printable.
+                    _draw_field_box(c, x, y, w, h)
+                    continue
+                _draw_field_box(c, x, y, w, h)
+                _draw_wrapped_in_rect(
+                    c, str(value), x + 1.5, y + 0.5, w - 3, h - 1,
+                    font=item.get("font", "Helvetica"),
+                    size=item.get("size", 9),
+                    align=item.get("align", "left"),
+                )
+
+        c.showPage()
+    c.save()
+
+
+def _draw_field_box(c: canvas.Canvas, x: float, y: float, w: float, h: float) -> None:
+    """Draw a thin underline beneath a field rect — same convention real
+    DA forms use to indicate fillable slots without a heavy box border."""
+    if w <= 0 or h <= 0:
+        return
+    c.setLineWidth(0.4)
+    c.setStrokeColorRGB(0.55, 0.55, 0.55)
+    c.line(x, y, x + w, y)
+    c.setStrokeColorRGB(0, 0, 0)
+
+
+def _draw_wrapped_in_rect(c: canvas.Canvas, text: str,
+                          x: float, y: float, w: float, h: float,
+                          font: str = "Helvetica", size: float = 8,
+                          align: str = "left") -> None:
+    """Draw text inside a rectangle with simple word-wrap. y/x are the
+    rect's lower-left corner. Text starts near the top of the rect (XFA
+    convention) and word-wraps if it overflows. Font size shrinks to fit
+    if a single line is wider than the rect.
+
+    Zero-dimension rects are XFA-author shorthand for "auto-size to
+    content" — we render the text as a single line at (x, y) without
+    wrapping or clipping, which preserves all the section headings and
+    block-number labels that armypubs' DA-31 emits with w=h=0.
+    """
+    if not text:
+        return
+    # Don't try to register fonts we don't have — fall back to Helvetica.
+    try:
+        c.setFont(font, size)
+    except Exception:
+        font = "Helvetica"
+        c.setFont(font, size)
+
+    # Auto-size shorthand: XFA <draw> with no width/height = "draw at
+    # this point, however wide the text needs to be."
+    if w <= 0 or h <= 0:
+        first_line = text.splitlines()[0] if "\n" in text else text
+        baseline = y + size * 0.18 if h <= 0 else y + max(0, (h - size) / 2) + size * 0.18
+        if align == "center":
+            c.drawCentredString(x, baseline, first_line)
+        elif align == "right":
+            c.drawRightString(x, baseline, first_line)
+        else:
+            c.drawString(x, baseline, first_line)
+        # If the original had newlines (e.g. "SIGNATURE AND TITLE OF  APPROVING AUTHORITY")
+        # render subsequent lines below.
+        if "\n" in text:
+            extra = text.splitlines()[1:]
+            for i, ln in enumerate(extra, 1):
+                if align == "center":
+                    c.drawCentredString(x, baseline - i * (size + 1), ln.strip())
+                elif align == "right":
+                    c.drawRightString(x, baseline - i * (size + 1), ln.strip())
+                else:
+                    c.drawString(x, baseline - i * (size + 1), ln.strip())
+        return
+
+    # Single-line shrink for horizontal fit
+    text_w = c.stringWidth(text, font, size)
+    if text_w <= w + 0.5 and "\n" not in text:
+        # Centerline within the box
+        baseline = y + max(0, (h - size) / 2) + size * 0.18
+        if align == "center":
+            c.drawCentredString(x + w / 2, baseline, text)
+        elif align == "right":
+            c.drawRightString(x + w, baseline, text)
+        else:
+            c.drawString(x, baseline, text)
+        return
+
+    # Multi-line wrap — each line uses the smaller of `size` or the size
+    # that fits the widest word.
+    lines: list[str] = []
+    for paragraph in text.split("\n"):
+        words = paragraph.split()
+        if not words:
+            lines.append("")
+            continue
+        cur = words[0]
+        for w_word in words[1:]:
+            cand = cur + " " + w_word
+            if c.stringWidth(cand, font, size) <= w:
+                cur = cand
+            else:
+                lines.append(cur)
+                cur = w_word
+        lines.append(cur)
+
+    line_h = size + 1.5
+    n = max(1, int(h // line_h))
+    lines = lines[:n]
+    # First-line baseline near the top of the rect.
+    top = y + h - size * 0.78
+    for i, ln in enumerate(lines):
+        baseline = top - i * line_h
+        if align == "center":
+            c.drawCentredString(x + w / 2, baseline, ln)
+        elif align == "right":
+            c.drawRightString(x + w, baseline, ln)
+        else:
+            c.drawString(x, baseline, ln)
+
+
+# ---------------------------------------------------------------------------
+# Strategy 3 — AcroForm fill (last-resort fallback)
+# ---------------------------------------------------------------------------
+
+def _strategy_acroform(template: Path, data: dict, out: Path,
+                       schema: dict | None) -> str:
+    """Vanilla pikepdf AcroForm fill. Used only if a future PDF lands in
+    forms/ that wasn't classified into a better strategy."""
+    if schema and "fields" in schema:
+        translated = {}
+        for sem, val in data.items():
+            spec = schema["fields"].get(sem, {})
+            pdf_name = spec.get("pdf_field") if isinstance(spec, dict) else None
+            translated[pdf_name or sem] = val
+        data = translated
+    n = 0
+    with pikepdf.open(str(template)) as pdf:
+        if "/AcroForm" in pdf.Root and "/Fields" in pdf.Root.AcroForm:
+            def walk(field):
+                nonlocal n
+                if "/Kids" in field:
+                    for k in field.Kids: walk(k)
+                    return
+                name = str(field.T) if "/T" in field else None
+                if name in data:
+                    field.V = pikepdf.String(str(data[name]))
+                    n += 1
+            for f in pdf.Root.AcroForm.Fields:
+                walk(f)
+            pdf.Root.AcroForm.NeedAppearances = True
+        pdf.save(str(out))
+    log.info(f"AcroForm fill: {n} fields → {out.name}")
+    return str(out)
+
+
+STRATEGY = {
+    "dd_1351_2_blank.pdf": _fill_dd_1351_2,
+    "da_31_blank.pdf":     _strategy_da_31,
+    "da_4856_blank.pdf":   _strategy_da_4856,
+}
+
+
+# ---------------------------------------------------------------------------
+# Drawing helpers
+# ---------------------------------------------------------------------------
+
+def _box(c: canvas.Canvas, x: float, y: float, w: float, h: float,
+         label: str = "", label_size: int = 6.5) -> None:
+    """Draw a labeled rectangular field box. Label sits inside the top-left
+    of the box in small uppercase, like the real DA forms."""
+    c.setLineWidth(0.6)
+    c.rect(x, y, w, h, stroke=1, fill=0)
+    if label:
+        c.setFont("Helvetica", label_size)
+        c.drawString(x + 3, y + h - 8, label)
+
+
+def _section(c: canvas.Canvas, y: float, title: str) -> None:
+    c.setFillColorRGB(0.92, 0.92, 0.92)
+    c.rect(40, y, PAGE_W - 80, 14, stroke=0, fill=1)
+    c.setFillColorRGB(0, 0, 0)
+    c.setFont("Helvetica-Bold", 9)
+    c.drawString(46, y + 3, title)
+
+
+def _draw_wrapped_text(c: canvas.Canvas, text: str, x: float, y_top: float,
+                       max_chars: int = 80, size: int = 10,
+                       line_height: float = 13) -> None:
+    """Word-wrap into the box. y_top is the baseline of the first line."""
+    if not text:
+        return
+    c.setFont("Helvetica", size)
     words = text.split()
-    line, lines = "", []
+    line = ""
+    lines: list[str] = []
     for w in words:
-        candidate = (line + " " + w).strip()
-        if len(candidate) > width_chars:
+        cand = (line + " " + w).strip()
+        if len(cand) > max_chars:
             lines.append(line)
             line = w
         else:
-            line = candidate
+            line = cand
     if line:
         lines.append(line)
     for i, ln in enumerate(lines):
-        c.drawString(x, y - i * line_height, ln)
+        c.drawString(x, y_top - i * line_height, ln)
 
 
-def _overlay_fill(template: Path, data: dict, out: Path) -> int:
-    """Merge a reportlab overlay onto each page of the template."""
-    field_map = OVERLAY_MAPS.get(template.name, {})
-    if not field_map:
-        log.warning(f"No overlay map for {template.name}; copying template unchanged")
-        with pikepdf.open(str(template)) as pdf:
-            pdf.save(str(out))
-        return 0
+def _fit_size(text: str, w: float, h: float, default: int = 10) -> int:
+    """Pick a font size that fits the rect. Cheap heuristic — roughly 5pt
+    of width per character at 10pt."""
+    if not text:
+        return default
+    size = default
+    while size > 6 and len(text) * size * 0.55 > w:
+        size -= 1
+    if h < size + 2:
+        size = max(6, int(h - 2))
+    return size
 
-    overlay_bytes = _build_overlay(field_map, data)
-    n_overlaid = sum(1 for page in field_map.values() for f, _ in page.items() if data.get(f))
 
-    with pikepdf.open(str(template)) as base, pikepdf.open(io.BytesIO(overlay_bytes)) as ov:
-        for page_idx, base_page in enumerate(base.pages):
-            if page_idx >= len(ov.pages):
-                break
-            base_page.add_overlay(ov.pages[page_idx])
-        base.save(str(out))
-
-    return n_overlaid
+def _build_multi_page_overlay(by_page: dict, n_pages: int) -> bytes:
+    """Build a multi-page reportlab overlay with text-draw instructions
+    given as `{page_idx: [(x, y, text, size), ...]}`."""
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=letter)
+    c.setFillColorRGB(0.05, 0.05, 0.05)
+    for pi in range(n_pages):
+        for x, y, text, size in by_page.get(pi, []):
+            c.setFont("Helvetica", size)
+            c.drawString(x, y, text)
+        c.showPage()
+    c.save()
+    return buf.getvalue()

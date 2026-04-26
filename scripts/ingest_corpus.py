@@ -26,10 +26,18 @@ CHUNK_OVERLAP = 150
 
 # Map PDF filename → human-readable source label for citations.
 SOURCE_LABELS = {
-    "AR_600-8-10_Leaves_and_Passes.pdf": "AR 600-8-10",
-    "JTR_2025-06.pdf": "Joint Travel Regulations",
-    "AR_623-3.pdf": "AR 623-3",
-    "FM_6-22.pdf": "FM 6-22",
+    "AR_600-8-10_Leaves_and_Passes.pdf":     "AR 600-8-10",
+    "AR_27-10_Military_Justice.pdf":         "AR 27-10",
+    "AR_623-3_Evaluation_Reporting.pdf":     "AR 623-3",
+    "AR_735-5_Property_Accountability.pdf":  "AR 735-5",
+    "AR_670-1_Wear_and_Appearance.pdf":      "AR 670-1",
+    "AR_600-8-22_Military_Awards.pdf":       "AR 600-8-22",
+    "AR_600-8-101_Personnel_Processing.pdf": "AR 600-8-101",
+    "AR_600-9_Body_Composition.pdf":         "AR 600-9",
+    "AR_600-85_Substance_Abuse.pdf":         "AR 600-85",
+    "FM_6-22_Leader_Development.pdf":        "FM 6-22",
+    "DA_Pam_600-25_NCO_Guide.pdf":           "DA Pam 600-25",
+    "JTR_2025-06.pdf":                       "Joint Travel Regulations",
 }
 
 
@@ -69,17 +77,32 @@ def chunk(text: str, size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> li
 
 
 def detect_section(text: str, source: str) -> str:
-    """Cheap section labeler — looks for 'Paragraph N-N' / 'Chapter N' / '§ N'."""
+    """Section labeler — finds the most specific paragraph / chapter / section
+    citation in the chunk. Returns the FIRST match in priority order:
+       1. paragraph + subsection letter:  'Paragraph 4-3a' or 'Para 4-3a'
+       2. paragraph alone:                'Paragraph 4-3' or '4–3.'
+       3. section number:                 'Section 12-7'
+       4. chapter only:                   'Chapter 4'
+       5. CFR section:                    '§ 4-3'
+
+    Handles both ASCII hyphen and Unicode en-dash (–) used by Army Pubs PDFs.
+    """
+    DASH = r"[\-–]"  # ASCII '-' or unicode en-dash '–'
+    NUM = rf"\d+{DASH}\d+[a-z]?"  # 4-3, 4–3, 4-3a
+
     patterns = [
-        r"(Paragraph\s+\d+[\-\.]\d+)",
-        r"(Chapter\s+\d+)",
-        r"(§\s*\d[\d\-\.]*)",
-        r"(Section\s+\d+[\-\.]\d+)",
+        # Most specific first
+        (rf"(?:Paragraph|Para|Section)\s+({NUM})", "Paragraph {0}"),
+        (rf"\b(?:Para|Paragraph)\.?\s+(\d+\.\d+[a-z]?)", "Paragraph {0}"),
+        (rf"^\s*({NUM})\.\s+[A-Z]", "Paragraph {0}"),     # "4-3. Authorization..."
+        (rf"\b§\s*({NUM})", "§ {0}"),
+        (rf"(Chapter\s+\d+)",         "{0}"),
+        (rf"(Appendix\s+[A-Z])",      "{0}"),
     ]
-    for p in patterns:
-        m = re.search(p, text)
+    for pattern, fmt in patterns:
+        m = re.search(pattern, text, flags=re.MULTILINE)
         if m:
-            return m.group(1)
+            return fmt.format(m.group(1))
     return ""
 
 

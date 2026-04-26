@@ -27,7 +27,7 @@
   <text x="108" y="220" fill="#ece7dc" font-size="56" font-weight="600" letter-spacing="-2">Adjutant</text>
 
   <!-- Headline -->
-  <text x="80" y="340" fill="#ece7dc" font-size="92" font-weight="600" letter-spacing="-4">Speak it. Sign it.</text>
+  <text x="80" y="340" fill="#ece7dc" font-size="92" font-weight="600" letter-spacing="-4">Speak it. Sign.</text>
   <text x="80" y="430" font-size="92" font-weight="400" letter-spacing="-3.5"
         font-family="Iowan Old Style, Charter, Georgia, serif" font-style="italic" fill="#d2cdc1">Move out.</text>
 

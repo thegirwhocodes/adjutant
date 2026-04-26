@@ -12,6 +12,7 @@ dist/
 
 # Models / indices (rebuilt by scripts/)
 .faiss_index/
+.faiss_index_*/
 .chunks/
 *.pkl
 models/
@@ -19,6 +20,15 @@ models/
 # Corpus PDFs (downloaded by scripts/, not committed — keeps repo light)
 corpus/*.pdf
 corpus/*.html
+corpus/hot/
+corpus/warm/
+corpus/cold/
+
+# Generated form artifacts
+forms_flat/
+
+# Adjutant runtime profile (CUI//PRIV — soldier's local identity, never committed)
+.adjutant/
 
 # Audio cache
 audio_cache/

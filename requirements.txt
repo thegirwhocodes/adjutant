@@ -28,6 +28,11 @@ pyttsx3==2.98
 requests==2.32.3
 beautifulsoup4==4.12.3
 
+# Optional: bulk corpus crawler (Tier-1 expansion to ~70 docs).
+# Not needed for the demo's curated corpus. Install with:
+#   pip install playwright && playwright install chromium
+# playwright>=1.46.0
+
 # Dev / test
 pytest==8.3.3
 pytest-asyncio==0.24.0
