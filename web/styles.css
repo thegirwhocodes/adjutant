@@ -3,7 +3,7 @@
    Anduril Lattice × ATAK Dark Ops × Apollo DSKY × MFoCS bezels.
    No CRT scanlines. No phosphor glow. No REDACTED bars. No camo.
    Earned-rugged, not LARP-rugged.
-   BUILD: 20260426c — equipment frame, hard reset cache.
+   BUILD: 20260426d — equipment frame, hard reset cache.
    ============================================================= */
 
 /* ---------- TOKENS ------------------------------------------- */
@@ -1358,19 +1358,22 @@ body {
   margin: 2rem auto 0;
   padding: 0;
   border: 0;
-  max-width: 28ch;
+  max-width: 30ch;
 }
 .wow__quote {
   font-family: var(--display);
   font-size: var(--t-3xl);
-  line-height: 1.05;
+  line-height: 1.08;
   letter-spacing: -0.03em;
   font-weight: 500;
   margin: 0;
   color: var(--ink);
   text-wrap: balance;
 }
-.wow__quote span { display: block; }
+/* Spans flow as inline prose — no forced line-per-clause stacking.
+   text-wrap: balance handles the line-break placement. */
+.wow__quote span { display: inline; }
+.wow__quote span + span::before { content: " "; }
 .wow__attrib {
   margin-top: 1.6rem;
   font-family: var(--mono);
