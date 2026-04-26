@@ -3,7 +3,7 @@
    Anduril Lattice × ATAK Dark Ops × Apollo DSKY × MFoCS bezels.
    No CRT scanlines. No phosphor glow. No REDACTED bars. No camo.
    Earned-rugged, not LARP-rugged.
-   BUILD: 20260426e — equipment frame, hard reset cache.
+   BUILD: 20260426f — equipment frame, hard reset cache.
    ============================================================= */
 
 /* ---------- TOKENS ------------------------------------------- */
@@ -1358,19 +1358,27 @@ body {
   margin: 2rem auto 0;
   padding: 0;
   border: 0;
-  max-width: 28ch;
+  /* Wide enough that the longest clause ("I'm going to JRTC at Fort Polk
+     July 14 for five days,") fits on a single line at the chosen size.
+     Anything narrower forces word-by-word wrapping. */
+  max-width: min(60rem, 92vw);
 }
 .wow__quote {
   font-family: var(--display);
-  font-size: var(--t-3xl);
-  line-height: 1.05;
-  letter-spacing: -0.03em;
+  font-size: var(--t-2xl);     /* dropped from --t-3xl; was breaking each word onto its own line */
+  line-height: 1.18;
+  letter-spacing: -0.02em;
   font-weight: 500;
   margin: 0;
   color: var(--ink);
   text-wrap: balance;
 }
-.wow__quote span { display: block; }
+/* Each clause on its own line, clause itself never wraps. */
+.wow__quote span { display: block; white-space: nowrap; }
+@media (max-width: 760px) {
+  .wow__quote { font-size: var(--t-xl); }
+  .wow__quote span { white-space: normal; }
+}
 .wow__attrib {
   margin-top: 1.6rem;
   font-family: var(--mono);
