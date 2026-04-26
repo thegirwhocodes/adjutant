@@ -106,7 +106,7 @@ main {
 }
 #citations strong { color: var(--text); }
 
-#form-pdf {
+#form-pdf, .form-pdf {
   width: 100%;
   height: 480px;
   border: 1px solid var(--border);
@@ -114,15 +114,32 @@ main {
   background: white;
 }
 
-#form-download {
+#form-download, .form-download {
   display: inline-block;
-  margin-top: 1rem;
+  margin-top: 0.6rem;
+  margin-right: 0.6rem;
   padding: 0.6rem 1rem;
   background: var(--accent);
   color: white;
   text-decoration: none;
   border-radius: 6px;
+  font-size: 0.95rem;
 }
+
+.form-block {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+.form-block:first-of-type { border-top: none; padding-top: 0; }
+.form-block h4 {
+  margin: 0 0 0.4rem 0;
+  color: var(--accent);
+  font-size: 1.05rem;
+  letter-spacing: 0.04em;
+}
+.form-meta { color: var(--muted); font-size: 0.9rem; margin-bottom: 0.6rem; }
+.form-empty { color: var(--muted); font-style: italic; }
 
 footer {
   padding: 1rem;

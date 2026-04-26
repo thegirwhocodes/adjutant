@@ -116,18 +116,40 @@ function renderReply(p) {
     citationsEl.appendChild(li);
   }
 
-  if (p.pdf_url) {
-    formSection.hidden = false;
-    formPdf.src = p.pdf_url;
-    formDownload.href = p.pdf_url;
-    const filled = Object.keys(p.form_data || {}).length;
-    formMeta.textContent = `Filled ${filled} field${filled === 1 ? "" : "s"}.`;
-  } else if (p.missing_fields?.length) {
-    formSection.hidden = false;
-    formMeta.textContent = `Need more info to file: ${p.missing_fields.join(", ")}.`;
-    formPdf.removeAttribute("src");
-    formDownload.removeAttribute("href");
-  } else {
+  // Multi-form rendering: if /query returned forms[], render one block per form.
+  // Falls back to the legacy single-form fields for backwards compat.
+  const forms = (p.forms && p.forms.length) ? p.forms : (
+    p.pdf_url || p.form_data
+      ? [{ form_id: "Form", form_data: p.form_data || {}, missing_fields: p.missing_fields || [], pdf_url: p.pdf_url }]
+      : []
+  );
+
+  if (!forms.length) {
     formSection.hidden = true;
+    return;
+  }
+
+  formSection.hidden = false;
+  // Replace the static iframe layout with a container we own.
+  formSection.innerHTML = `<h3>${forms.length === 1 ? "Generated form" : `Generated ${forms.length} forms`}</h3>`;
+
+  for (const f of forms) {
+    const block = document.createElement("div");
+    block.className = "form-block";
+    const filledCount = Object.values(f.form_data || {}).filter(v => v !== "" && v !== null).length;
+    const missingTxt = f.missing_fields?.length
+      ? ` · need: ${f.missing_fields.join(", ")}`
+      : "";
+
+    block.innerHTML = `
+      <h4>${f.form_id}</h4>
+      <p class="form-meta">Filled ${filledCount} field${filledCount === 1 ? "" : "s"}${missingTxt}</p>
+      ${f.pdf_url
+        ? `<iframe class="form-pdf" src="${f.pdf_url}" title="${f.form_id} preview"></iframe>
+           <a class="form-download" href="${f.pdf_url}" download>Download ${f.form_id}</a>`
+        : `<p class="form-empty">No PDF generated — see structured data above.</p>`
+      }
+    `;
+    formSection.appendChild(block);
   }
 }

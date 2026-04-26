@@ -45,16 +45,30 @@ app.mount("/audio", StaticFiles(directory="audio_cache"), name="audio")
 
 class QueryRequest(BaseModel):
     query: str
-    form_id: str | None = None  # if set, attempt form extraction
+    # Either a single form id or a list. None = auto-infer from the query.
+    form_id: str | list[str] | None = None
+
+
+class FormResult(BaseModel):
+    """One filled form. /query returns a list of these so a single voice
+    request like 'I'm going to JRTC, need to counsel Garcia, want 2 days
+    of leave when I get back' produces three PDFs in one shot."""
+    form_id: str
+    form_data: dict
+    missing_fields: list[str] = []
+    pdf_url: str | None = None
 
 
 class QueryResponse(BaseModel):
     spoken_summary: str
     citations: list[dict]
+    forms: list[FormResult] = []
+    audio_url: str | None = None
+    # Legacy single-form fields kept so existing frontends don't break.
+    # Populated from forms[0] when forms is non-empty.
     form_data: dict | None = None
     missing_fields: list[str] = []
     pdf_url: str | None = None
-    audio_url: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -86,7 +100,11 @@ async def transcribe_audio(file: UploadFile = File(...)):
 
 @app.post("/query", response_model=QueryResponse)
 async def query(req: QueryRequest):
-    """End-to-end pipeline: text query → RAG → LLM → optional form fill → TTS audio."""
+    """End-to-end pipeline: text query → RAG → LLM → 0-N form fills → TTS audio.
+
+    Returns a list of FormResult under `forms[]` so a single voice request
+    can produce DA-31 + DD-1351-2 + DA-4856 from one sentence.
+    """
     # 1. Retrieve relevant regulation chunks
     chunks = retrieve(req.query, top_k=int(os.getenv("TOP_K", "5")))
     log.info(f"Retrieved {len(chunks)} chunks for: {req.query!r}")
@@ -94,64 +112,57 @@ async def query(req: QueryRequest):
     # 2. Generate grounded answer
     answer = answer_query(req.query, chunks)
 
-    # 3. If a form_id was specified or inferred, extract structured form data
-    form_data, missing, pdf_url = None, [], None
-    target_form = req.form_id or _infer_form(req.query)
-    if target_form:
+    # 3. Determine which forms to generate.
+    if req.form_id is None:
+        target_forms = _infer_forms(req.query)
+    elif isinstance(req.form_id, list):
+        target_forms = req.form_id
+    else:
+        target_forms = [req.form_id]
+
+    if target_forms:
+        log.info(f"Generating {len(target_forms)} form(s): {target_forms}")
+
+    # 4. Iterate: extract → post-process → fill PDF for each form.
+    results: list[FormResult] = []
+    for fid in target_forms:
         try:
-            schema = get_schema(target_form)
-            extraction = extract_form_data(req.query, chunks, schema)
-            form_data = extraction.get("data")
-            missing = extraction.get("missing_fields", [])
-
-            # Hard-correct leave_type: don't trust the LLM here — RAG keeps
-            # retrieving emergency-leave chunks and the model anchors on them.
-            # Determine type from the soldier's actual words, defaulting to
-            # Ordinary unless they explicitly said otherwise.
-            if target_form == "DA-31" and form_data:
-                import re as _re
-                q_lower = req.query.lower()
-                # Strip the "emergency contact <name + phone>" phrase first —
-                # otherwise the word 'emergency' there triggers a false positive.
-                q_lower = _re.sub(r"emergency contact[^.,;]*", " ", q_lower)
-
-                explicit = [
-                    ("Emergency",    ("emergency leave", "family emergency",
-                                      "death in", "funeral", "family member died",
-                                      "next of kin")),
-                    ("Convalescent", ("convalescent", "surgery", "recovery",
-                                      "medical leave")),
-                    ("Terminal",     ("terminal leave", "ets-ing", "separation",
-                                      "retiring", "ets leave")),
-                    ("PTDY",         ("ptdy", "permissive tdy", "house hunting")),
-                ]
-                detected = "Ordinary"
-                for label, kws in explicit:
-                    if any(k in q_lower for k in kws):
-                        detected = label
-                        break
-                if form_data.get("leave_type") != detected:
-                    log.info(f"Override leave_type {form_data.get('leave_type')!r} → {detected!r}")
-                    form_data["leave_type"] = detected
-
-            # DD-1351-2 deterministic per-diem math: don't trust the LLM with
-            # arithmetic. The LLM extracts city/state/days from the request;
-            # adjutant.per_diem looks up the GSA rate and computes the totals
-            # exactly per JTR Chapter 5 (75% on travel days, full on intervening).
-            if target_form == "DD-1351-2" and form_data:
-                _wire_per_diem(form_data)
-
-            # Always render a PDF if we have form_data — fill what we know,
-            # leave missing fields blank for the chain of command to complete.
-            if form_data:
-                out_pdf = FILLED_DIR / f"{target_form}-{uuid.uuid4().hex[:8]}.pdf"
-                fill_pdf(schema["pdf_path"], form_data, str(out_pdf), schema=schema)
-                pdf_url = f"/filled/{out_pdf.name}"
-                log.info(f"Filled {target_form} → {pdf_url} (missing: {missing or 'none'})")
+            schema = get_schema(fid)
         except KeyError as e:
             log.warning(f"Form not registered: {e}")
+            continue
 
-    # 4. Synthesize spoken summary
+        extraction = extract_form_data(req.query, chunks, schema)
+        form_data = extraction.get("data") or {}
+        missing = extraction.get("missing_fields", [])
+
+        # Per-form post-processing
+        if fid == "DA-31":
+            _correct_leave_type(form_data, req.query)
+        if fid == "DD-1351-2":
+            _wire_per_diem(form_data)
+
+        if not form_data:
+            log.info(f"{fid}: no form_data extracted, skipping PDF")
+            continue
+
+        out_pdf = FILLED_DIR / f"{fid}-{uuid.uuid4().hex[:8]}.pdf"
+        try:
+            fill_pdf(schema["pdf_path"], form_data, str(out_pdf), schema=schema)
+            pdf_url = f"/filled/{out_pdf.name}"
+            log.info(f"Filled {fid} → {pdf_url} (missing: {missing or 'none'})")
+        except Exception as e:
+            log.warning(f"Fill {fid} failed (continuing): {e}")
+            pdf_url = None
+
+        results.append(FormResult(
+            form_id=fid,
+            form_data=form_data,
+            missing_fields=missing,
+            pdf_url=pdf_url,
+        ))
+
+    # 5. Synthesize spoken summary
     audio_url = None
     try:
         audio_path = AUDIO_DIR / f"reply-{uuid.uuid4().hex[:8]}.wav"
@@ -160,14 +171,45 @@ async def query(req: QueryRequest):
     except Exception as e:
         log.warning(f"TTS failed (non-fatal): {e}")
 
+    # Backwards-compat: populate legacy single-form fields from forms[0].
+    legacy_data = results[0].form_data if results else None
+    legacy_missing = results[0].missing_fields if results else []
+    legacy_pdf = results[0].pdf_url if results else None
+
     return QueryResponse(
         spoken_summary=answer["spoken_summary"],
         citations=answer["citations"],
-        form_data=form_data,
-        missing_fields=missing,
-        pdf_url=pdf_url,
+        forms=results,
         audio_url=audio_url,
+        form_data=legacy_data,
+        missing_fields=legacy_missing,
+        pdf_url=legacy_pdf,
     )
+
+
+def _correct_leave_type(form_data: dict, query: str) -> None:
+    """DA-31 leave_type override: don't trust the LLM (RAG anchors it on
+    'emergency' chunks). Default Ordinary unless the soldier explicitly said
+    otherwise. Strips 'emergency contact ...' phrase first to avoid false
+    positives."""
+    import re as _re
+    q_lower = _re.sub(r"emergency contact[^.,;]*", " ", query.lower())
+    explicit = [
+        ("Emergency",    ("emergency leave", "family emergency", "death in",
+                          "funeral", "family member died", "next of kin")),
+        ("Convalescent", ("convalescent", "surgery", "recovery", "medical leave")),
+        ("Terminal",     ("terminal leave", "ets-ing", "separation",
+                          "retiring", "ets leave")),
+        ("PTDY",         ("ptdy", "permissive tdy", "house hunting")),
+    ]
+    detected = "Ordinary"
+    for label, kws in explicit:
+        if any(k in q_lower for k in kws):
+            detected = label
+            break
+    if form_data.get("leave_type") != detected:
+        log.info(f"Override leave_type {form_data.get('leave_type')!r} → {detected!r}")
+        form_data["leave_type"] = detected
 
 
 @app.post("/voice")
@@ -221,43 +263,64 @@ def _wire_per_diem(form_data: dict) -> None:
     )
 
 
-def _infer_form(query: str) -> str | None:
-    """Intent classifier — fires on action OR direct first-person statements.
+def _infer_forms(query: str) -> list[str]:
+    """Intent classifier — returns a LIST of forms to generate.
 
-    A form-fill is triggered when the user is *acting* (not asking). We treat
-    these signals as actionable:
-      - explicit action verbs: file, submit, draft, fill, request, put in, need
-      - direct first-person leave/TDY framing: "I need", "I want", "I'm going",
-        "I'll be at", "starting <date>", "<N> days of"
+    A single utterance can trigger MULTIPLE forms when the soldier mentions
+    leave AND TDY AND counseling in the same breath:
 
-    Pure Q&A ("How does leave accrue?", "What is per diem?") does NOT trigger.
+      "I'm going to JRTC at Fort Polk July 14 for 5 days, need to counsel
+       SPC Garcia tomorrow, and want 2 days of leave when I get back."
+
+    This is the demo's wow moment: one voice request → three filled PDFs.
+
+    Pure Q&A ("How does leave accrue?", "What is per diem?") does NOT
+    trigger anything.
     """
     import re
     q = query.lower()
 
-    # Hard exclude pure questions
-    starts_with_q = q.lstrip().startswith(("how ", "what ", "when ", "why ",
-                                           "where ", "who ", "does ", "do "))
+    # Hard-exclude pure questions
+    starts_with_q = q.lstrip().startswith(
+        ("how ", "what ", "when ", "why ", "where ", "who ", "does ", "do ")
+    )
     if starts_with_q and "?" in q and not any(
         v in q for v in ("file", "submit", "draft", "request")
     ):
-        return None
+        return []
 
     actionable = bool(
         re.search(r"\bi\s+(need|want|am going|'m going|'ll|will|would like)\b", q)
         or re.search(r"\b(file|submit|draft|fill|request|put in)\b", q)
-        or re.search(r"\b\d+\s+days?\s+of\b", q)        # "ten days of"
+        or re.search(r"\b\d+\s+days?\s+of\b", q)
         or re.search(r"\bstarting\s+(june|july|aug|sep|oct|nov|dec|jan|feb|mar|apr|may|next)\b", q)
         or re.search(r"\bgoing to\s+(attend|the|fort|jrtc|ntc|atlanta|\w+)\b", q)
     )
     if not actionable:
-        return None
+        return []
 
-    if any(k in q for k in ("leave", "vacation", "time off", "da-31", "da 31")):
-        return "DA-31"
+    forms: list[str] = []
+    # TDY first (more specific) — keywords that imply travel
     if any(k in q for k in ("tdy", "travel", "voucher", "per diem", "trip",
-                            "dd-1351", "dd 1351", "jrtc", "ntc")):
-        return "DD-1351-2"
-    if any(k in q for k in ("counsel", "counseling", "da-4856", "da 4856")):
-        return "DA-4856"
-    return None
+                            "dd-1351", "dd 1351", "jrtc", "ntc",
+                            "mission rehearsal", "training trip")):
+        forms.append("DD-1351-2")
+    # Leave (only if 'leave' is used in the request-sense, not 'when I get back')
+    if re.search(r"\b(leave|vacation|time off|da-?31)\b", q):
+        # Avoid matching "I leave on Tuesday" — only count when leave looks like a noun
+        if re.search(r"\b\d+\s+days?\b.*\bleave\b", q) or re.search(
+            r"\bleave\b.*(starting|from|june|july|aug|sep|oct|nov|dec|jan|feb|mar|apr|may)", q
+        ) or re.search(r"\b(file|submit|draft|request|put in|need|want|days? of)\b.*\bleave\b", q) \
+           or re.search(r"\bleave\b.*\b(starting|when|after|before)\b", q):
+            forms.append("DA-31")
+    # Counseling
+    if any(k in q for k in ("counsel", "counseling", "da-4856", "da 4856",
+                            "corrective", "performance review")):
+        forms.append("DA-4856")
+    return forms
+
+
+def _infer_form(query: str) -> str | None:
+    """Backwards-compat wrapper for code that expects a single form."""
+    forms = _infer_forms(query)
+    return forms[0] if forms else None
