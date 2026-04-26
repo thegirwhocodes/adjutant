@@ -19,11 +19,16 @@
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:image" content="/web/og-card.svg">
 
-  <link rel="preload" href="/web/styles.css?v=20260426l" as="style">
-  <link rel="stylesheet" href="/web/styles.css?v=20260426l">
-  <!-- Cache-bust via ?v= query string only. Browser keeps disk cache
-       between version bumps so reloads don't re-download everything.
-       Bump v= in this file + styles.css when shipping a real change. -->
+  <link rel="preconnect" href="/">
+  <link rel="prefetch" href="/health" as="fetch" crossorigin>
+  <link rel="preload" href="/web/styles.css?v=20260426k" as="style">
+  <link rel="stylesheet" href="/web/styles.css?v=20260426k">
+
+  <!-- Force fresh fetches on every reload — defeats stale-asset caching
+       while we iterate on the frame redesign. Remove for production. -->
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
 
   <script>document.documentElement.classList.replace("no-js","js");</script>
 
@@ -813,7 +818,7 @@
     UNCLASSIFIED // OPEN SOURCE // BUILT FOR THE RANK-AND-FILE
   </div>
 
-  <script src="/web/marketing.js?v=20260426l" defer></script>
-  <script src="/web/app.js?v=20260426l" defer></script>
+  <script src="/web/marketing.js?v=20260426k" defer></script>
+  <script src="/web/app.js?v=20260426k" defer></script>
 </body>
 </html>
