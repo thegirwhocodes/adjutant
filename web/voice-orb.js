@@ -1,19 +1,17 @@
-// Adjutant voice orb — direct port of ElevenLabs Conversational AI orb.
-// Source: github.com/elevenlabs/packages/convai-widget-core/src/orb
-// (Orb.ts + OrbShader.vert + OrbShader.frag)
+// Adjutant voice orb — soft amorphous gradient blob with audio-reactive
+// surface ripple, FBM noise interior, and amplitude-driven hue mix.
 //
-// WebGL2 single-fullscreen-quad fragment shader. Seven animated ovals
-// in polar coordinates + two noisy concentric rings, all blended through
-// a 4-color ramp (black → uColor1 → uColor2 → white).
+// The previous version was a direct port of ElevenLabs' ConvAI Orb shader
+// (MIT, Copyright (c) 2025 ElevenLabs — github.com/elevenlabs/packages/
+// convai-widget-core/src/orb/OrbShader.frag). It's preserved in git
+// history; this rewrite keeps the same module API (initVoiceOrb,
+// setState, updateVolume) but renders a different visual: a soft
+// gradient cloud disc instead of seven polar ovals + noise rings. The
+// audio reactivity (color tones shifting while you speak) is preserved.
 //
-// Modifications for Adjutant:
-//   1. Perlin texture generated procedurally on init (stays offline —
-//      ElevenLabs fetches a PNG from their CDN; we don't).
-//   2. State-driven color pairs (Adjutant amber palette).
-//   3. updateVolume(in, out) uses ElevenLabs' exact speed formula but
-//      drives a single `uSpeed` uniform that advances uTime per-frame.
-//   4. sRGB→linear gamma correction preserved (critical — without it
-//      colors look washed out).
+// Influences: ElevenLabs orb (general structure, gamma correction,
+// speed-formula), ChatGPT mobile orb (soft cloud aesthetic, FBM
+// vertex displacement). All shader code below is original.
 
 const VERT = `#version 300 es
 precision highp float;
@@ -28,10 +26,8 @@ const FRAG = `#version 300 es
 precision highp float;
 
 uniform float uTime;
-uniform float uOffsets[7];
 uniform vec3 uColor1;
 uniform vec3 uColor2;
-uniform sampler2D uPerlinTexture;
 uniform float uInputVolume;
 uniform float uOutputVolume;
 
@@ -40,107 +36,80 @@ out vec4 outColor;
 
 const float PI = 3.14159265358979323846;
 
-bool drawOval(vec2 polarUv, vec2 polarCenter, float a, float b, bool reverseGradient, float softness, out vec4 color) {
-  vec2 p = polarUv - polarCenter;
-  float oval = (p.x * p.x) / (a * a) + (p.y * p.y) / (b * b);
-  float edge = smoothstep(1.0, 1.0 - softness, oval);
-  if (edge > 0.0) {
-    float gradient = reverseGradient ? (1.0 - (p.x / a + 1.0) / 2.0) : ((p.x / a + 1.0) / 2.0);
-    color = vec4(vec3(gradient), 0.8 * edge);
-    return true;
-  }
-  return false;
+// 2D hash + value noise + FBM (4 octaves)
+float hash(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
 }
-
-vec3 colorRamp(float g, vec3 c1, vec3 c2, vec3 c3, vec3 c4) {
-  if (g < 0.33) return mix(c1, c2, g * 3.0);
-  if (g < 0.66) return mix(c2, c3, (g - 0.33) * 3.0);
-  return mix(c3, c4, (g - 0.66) * 3.0);
-}
-
-vec2 hash2(vec2 p) {
-  return fract(sin(vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)))) * 43758.5453);
-}
-
-float noise2D(vec2 p) {
+float vnoise(vec2 p) {
   vec2 i = floor(p);
   vec2 f = fract(p);
   vec2 u = f * f * (3.0 - 2.0 * f);
-  float n = mix(
-    mix(dot(hash2(i + vec2(0.0, 0.0)), f - vec2(0.0, 0.0)),
-        dot(hash2(i + vec2(1.0, 0.0)), f - vec2(1.0, 0.0)), u.x),
-    mix(dot(hash2(i + vec2(0.0, 1.0)), f - vec2(0.0, 1.0)),
-        dot(hash2(i + vec2(1.0, 1.0)), f - vec2(1.0, 1.0)), u.x),
+  return mix(
+    mix(hash(i + vec2(0.0, 0.0)), hash(i + vec2(1.0, 0.0)), u.x),
+    mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x),
     u.y
   );
-  return 0.5 + 0.5 * n;
 }
-
-float sharpRing(vec2 uv, float theta, float time) {
-  vec2 noiseCoord = vec2(theta / (2.0 * PI), time * 0.1) * 5.0;
-  float noise = (noise2D(noiseCoord) - 0.5) * 4.0;
-  return 1.0 + noise * 0.5 * 1.5;
-}
-
-float smoothRing(vec2 uv, float time) {
-  float angle = atan(uv.y, uv.x);
-  if (angle < 0.0) angle += 2.0 * PI;
-  vec2 noiseCoord = vec2(angle / (2.0 * PI), time * 0.1) * 6.0;
-  float noise = (noise2D(noiseCoord) - 0.5) * 8.0;
-  return 0.9 + noise * 0.3;
+float fbm(vec2 p) {
+  float v = 0.0;
+  float amp = 0.5;
+  for (int i = 0; i < 4; i++) {
+    v += amp * vnoise(p);
+    p *= 2.03;
+    amp *= 0.5;
+  }
+  return v;
 }
 
 void main() {
-  vec2 uv = vUv * 2.0 - 1.0;
-  float radius = length(uv);
-  float theta = atan(uv.y, uv.x);
-  if (theta < 0.0) theta += 2.0 * PI;
+  vec2 uv = vUv * 2.0 - 1.0;          // -1..1
+  float r   = length(uv);
+  float ang = atan(uv.y, uv.x);
 
-  vec4 color = vec4(1.0, 1.0, 1.0, 1.0);
+  float drive = max(uInputVolume, uOutputVolume);
+  float t     = uTime;
 
-  float originalCenters[7] = float[7](0.0, 0.5 * PI, 1.0 * PI, 1.5 * PI, 2.0 * PI, 2.5 * PI, 3.0 * PI);
-  float centers[7];
-  for (int i = 0; i < 7; i++) {
-    centers[i] = originalCenters[i] + 0.5 * sin(uTime / 20.0 + uOffsets[i]);
+  // --- Perimeter ripple — irregular squishy edge driven by amplitude ---
+  // Unwrap angle into a circle-of-noise so the perimeter wobbles smoothly
+  // and seamlessly (no seam at theta = ±PI).
+  float n_perim = fbm(vec2(cos(ang) * 1.6 + t * 0.25,
+                           sin(ang) * 1.6 + t * 0.25));
+  float ripple  = (n_perim - 0.5) * (0.06 + drive * 0.14);
+  float discR   = 0.78 + ripple;       // base radius with audio-reactive wobble
+
+  // --- Disc alpha with feathered edge ---
+  float disc = 1.0 - smoothstep(discR - 0.06, discR, r);
+  if (disc <= 0.0) {
+    outColor = vec4(0.0);
+    return;
   }
 
-  float a, b;
-  vec4 ovalColor;
-  for (int i = 0; i < 7; i++) {
-    float noise = texture(uPerlinTexture, vec2(mod(centers[i] + uTime * 0.05, 1.0), 0.5)).r;
-    a = noise * 1.5;
-    b = noise * 4.5;
-    bool reverseGradient = (i % 2 == 1);
-    float distTheta = abs(theta - centers[i]);
-    if (distTheta > PI) distTheta = 2.0 * PI - distTheta;
-    float distRadius = radius;
-    float softness = 0.4;
-    if (drawOval(vec2(distTheta, distRadius), vec2(0.0, 0.0), a, b, reverseGradient, softness, ovalColor)) {
-      color.rgb = mix(color.rgb, ovalColor.rgb, ovalColor.a);
-      color.a = max(color.a, ovalColor.a);
-    }
-  }
+  // --- Interior cloud — multi-octave noise drifting ---
+  float cloud = fbm(uv * 1.4 + vec2(t * 0.18, t * -0.12));
 
-  float ringRadius1 = sharpRing(uv, theta, uTime);
-  float ringRadius2 = smoothRing(uv, uTime);
-  float ringAlpha1 = (radius >= ringRadius1) ? 0.3 : 0.0;
-  float ringAlpha2 = smoothstep(ringRadius2 - 0.05, ringRadius2 + 0.05, radius) * 0.25;
-  float totalRingAlpha = max(ringAlpha1, ringAlpha2);
-  vec3 ringColor = vec3(1.0);
-  color.rgb = 1.0 - (1.0 - color.rgb) * (1.0 - ringColor * totalRingAlpha);
+  // --- Radial brightness — soft falloff from a slightly-off-center core ---
+  vec2 coreOffset = vec2(sin(t * 0.3) * 0.10, cos(t * 0.27) * 0.10);
+  float coreD = length(uv - coreOffset);
+  float core  = pow(1.0 - clamp(coreD / discR, 0.0, 1.0), 1.6);
 
-  // Color ramp: black → uColor1 → uColor2 → white
-  vec3 c1 = vec3(0.0, 0.0, 0.0);
-  vec3 c2 = uColor1;
-  vec3 c3 = uColor2;
-  vec3 c4 = vec3(1.0, 1.0, 1.0);
-  float luminance = color.r;
-  color.rgb = colorRamp(luminance, c1, c2, c3, c4);
+  // --- Color blend: lerp uColor1 → uColor2 by core+cloud, with extra
+  //     hue lift on amplitude (this is the "tones shift while talking"
+  //     feel — the higher the amplitude, the more uColor2 shows).
+  float mixT = clamp(core * 0.7 + cloud * 0.5 + drive * 0.25, 0.0, 1.0);
+  vec3 base  = mix(uColor1, uColor2, mixT);
 
-  // Hard circular alpha cutoff so the orb is a defined disc, not a square.
-  // Soft 2-pixel feather on the edge.
-  float discAlpha = 1.0 - smoothstep(0.96, 1.00, radius);
-  outColor = vec4(color.rgb, discAlpha);
+  // --- Bright core lift — adds the "glowing center" without a Phong sphere ---
+  vec3 lit = base + uColor2 * core * (0.20 + drive * 0.30);
+
+  // --- Soft fresnel rim — defines the edge without a halo ---
+  float rim = smoothstep(discR - 0.18, discR, r);
+  lit = mix(lit, uColor2 * 0.85, rim * 0.35);
+
+  // --- Subtle inner shadow at the bottom for depth (not Phong, just bias) ---
+  float shade = clamp(uv.y * 0.18 + 0.5, 0.0, 1.0);
+  lit *= 0.85 + shade * 0.20;
+
+  outColor = vec4(lit, disc);
 }`;
 
 // State color pairs — Adjutant amber palette (sRGB hex; gamma-corrected on upload)
