@@ -3,47 +3,639 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Adjutant</title>
+  <title>Adjutant — voice-first, fully offline AI for Army paperwork</title>
+  <meta name="description" content="Adjutant is a voice-first, fully offline AI assistant for the Army's bureaucratic tail. Cites the regulation by section. Fills the actual DA-form PDF. Runs on a laptop. No internet required.">
+  <meta name="theme-color" content="#0a0a0a">
+  <meta property="og:title" content="Adjutant — Speak it. Sign it. Move out.">
+  <meta property="og:description" content="Voice-first, fully offline AI assistant for Army paperwork. Cites the regulation. Fills the form. Runs on a laptop.">
+  <meta property="og:type" content="website">
+  <link rel="preload" href="/web/styles.css" as="style">
   <link rel="stylesheet" href="/web/styles.css">
 </head>
 <body>
-  <header>
-    <h1>Adjutant</h1>
-    <p class="tagline">Voice-first, fully offline. Cites the regulation. Fills the form.</p>
-    <div id="net-status" class="badge">Checking network…</div>
-  </header>
+  <!-- Grain overlay & cursor -->
+  <div class="grain" aria-hidden="true"></div>
+  <div class="cursor-dot" aria-hidden="true"></div>
 
-  <main>
-    <section class="mic-area">
-      <button id="mic-btn" type="button" aria-label="Hold to talk">
-        <span class="mic-icon">🎙</span>
-        <span class="mic-label">Hold to talk</span>
-      </button>
-      <p id="mic-hint">Try: <em>"I need to file leave for ten days starting June 3."</em></p>
-      <p id="transcript" class="transcript"></p>
-    </section>
+  <!-- ============================================================ -->
+  <!-- Top navigation                                                -->
+  <!-- ============================================================ -->
+  <nav class="nav" id="nav">
+    <a href="#top" class="nav__brand" aria-label="Adjutant home">
+      <span class="nav__mark">▌</span>
+      <span class="nav__wordmark">Adjutant</span>
+    </a>
+    <div class="nav__links">
+      <a href="#problem">Problem</a>
+      <a href="#demo">Demo</a>
+      <a href="#pipeline">Pipeline</a>
+      <a href="#forms">Forms</a>
+      <a href="#compare">Compare</a>
+      <a href="#offline">Offline</a>
+    </div>
+    <a href="#demo" class="nav__cta" data-magnetic>
+      <span>Try it</span>
+      <span class="nav__cta-arrow">→</span>
+    </a>
+  </nav>
 
-    <section class="reply" id="reply" hidden>
-      <h2>Adjutant says</h2>
-      <p id="spoken-summary"></p>
-      <audio id="reply-audio" controls></audio>
-
-      <h3>Citations</h3>
-      <ul id="citations"></ul>
-
-      <div id="form-section" hidden>
-        <h3>Generated form</h3>
-        <p id="form-meta"></p>
-        <iframe id="form-pdf" title="Filled PDF preview"></iframe>
-        <a id="form-download" href="#" download>Download PDF</a>
+  <!-- ============================================================ -->
+  <!-- Hero                                                          -->
+  <!-- ============================================================ -->
+  <section class="hero" id="top">
+    <div class="hero__chrome">
+      <div class="hero__spec">
+        <span class="dot"></span>
+        <span>CHARLIE MIKE</span>
+        <span class="sep">/</span>
+        <span>SCSP HACKATHON · BOSTON 2026</span>
+        <span class="sep">/</span>
+        <span>GENAI.MIL TRACK</span>
       </div>
-    </section>
-  </main>
+      <div class="hero__net">
+        <span id="net-status" class="badge">Checking network…</span>
+      </div>
+    </div>
 
-  <footer>
-    <small>Charlie Mike · SCSP Hackathon Boston 2026 · GenAI.mil track</small>
+    <h1 class="hero__title" data-reveal>
+      <span class="line">Speak&nbsp;it.</span>
+      <span class="line">Sign&nbsp;it.</span>
+      <span class="line line--accent">Move&nbsp;out.</span>
+    </h1>
+
+    <p class="hero__lede" data-reveal>
+      A voice-first, fully offline AI assistant for the Army's
+      <span class="hl">bureaucratic tail.</span>
+      Speak the way you'd speak to your S1. Adjutant cites the regulation by
+      section, fills the actual DA-form PDF, and never touches the internet.
+    </p>
+
+    <div class="hero__ctas" data-reveal>
+      <a href="#demo" class="btn btn--primary" data-magnetic>
+        <span class="btn__label">Run the live demo</span>
+        <span class="btn__icon" aria-hidden="true">▶</span>
+      </a>
+      <a href="https://github.com" class="btn btn--ghost" data-magnetic>
+        <span>View source</span>
+        <span class="btn__icon" aria-hidden="true">↗</span>
+      </a>
+    </div>
+
+    <div class="hero__sheet" data-reveal>
+      <dl class="sheet">
+        <div><dt>Pipeline</dt><dd>STT · RAG · LLM · PDF · TTS</dd></div>
+        <div><dt>Models</dt><dd>Whisper · Llama 3.2 · Kokoro 82M</dd></div>
+        <div><dt>Footprint</dt><dd>~3 GB resident · M1/M2 Air-class</dd></div>
+        <div><dt>Network</dt><dd class="mono">required: <s>yes</s> none</dd></div>
+      </dl>
+    </div>
+
+    <div class="hero__scroll" aria-hidden="true">
+      <span>scroll</span>
+      <span class="hero__scroll-line"></span>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- Regulations marquee                                           -->
+  <!-- ============================================================ -->
+  <section class="marquee" aria-label="Regulations indexed">
+    <div class="marquee__label">
+      <span class="dot dot--amber"></span>
+      <span>CORPUS · 16,301 chunks indexed locally</span>
+    </div>
+    <div class="marquee__track" id="marqueeTrack"></div>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- The problem                                                   -->
+  <!-- ============================================================ -->
+  <section class="section section--problem" id="problem">
+    <div class="section__head">
+      <span class="eyebrow">§ 01 · The problem</span>
+      <h2 class="section__title" data-reveal>
+        The bureaucratic tail of the military
+        <span class="hl">significantly drains mission readiness.</span>
+      </h2>
+      <p class="section__sub" data-reveal>
+        SCSP's GenAI.mil brief said it out loud. The Pentagon's own framing —
+        <em>"not everyone is sitting in a nice, cushy, air-conditioned office"</em>
+        — makes the gap obvious. The mechanics, the platoon sergeants, the
+        soldiers in motor pools where the wifi cuts out don't have desks. They
+        have phones. And they have paperwork.
+      </p>
+    </div>
+
+    <div class="stats">
+      <article class="stat" data-reveal>
+        <div class="stat__num"><span class="num">12.5</span><span class="unit">h</span></div>
+        <p class="stat__copy">
+          Average workday for an Army company leader. Longer than
+          <strong>96% of all American workers.</strong>
+        </p>
+        <cite class="stat__cite">RAND Corporation · 2019</cite>
+      </article>
+
+      <article class="stat" data-reveal>
+        <div class="stat__num"><span class="num">3–4</span><span class="unit">×12</span></div>
+        <p class="stat__copy">
+          Monthly reports per company. Completion eats
+          <strong>one full week, every month,</strong> from command teams.
+        </p>
+        <cite class="stat__cite">Modern War Institute · West Point</cite>
+      </article>
+
+      <article class="stat" data-reveal>
+        <div class="stat__num"><span class="num">$23.4</span><span class="unit">B/yr</span></div>
+        <p class="stat__copy">
+          3M service members × 6 hrs/wk on paperwork × $25/hr loaded =
+          <strong>recoverable mission-readiness labor.</strong>
+        </p>
+        <cite class="stat__cite">Adjutant TAM model · 2026</cite>
+      </article>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- Live demo (preserves all existing IDs for app.js)             -->
+  <!-- ============================================================ -->
+  <section class="section section--demo" id="demo">
+    <div class="section__head">
+      <span class="eyebrow">§ 02 · Live, on this machine</span>
+      <h2 class="section__title" data-reveal>
+        Talk to it.
+        <span class="hl">Watch it cite. Watch it fill.</span>
+      </h2>
+      <p class="section__sub" data-reveal>
+        Hit start. Say <em>"I need to file leave for ten days starting June 3,
+        going to my sister's wedding in Atlanta."</em> Adjutant pulls
+        AR 600-8-10 paragraph 4-3, drafts a signed-ready DA-31, and reads the
+        summary back out loud. There is no cloud round-trip in this flow.
+      </p>
+    </div>
+
+    <div class="console" data-reveal>
+      <header class="console__bar">
+        <span class="console__dots" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="console__title mono">adjutant.local · /ws/voice</span>
+        <span class="console__pill mono">100% LOCAL</span>
+      </header>
+
+      <!-- Tier status — preserved from prior build; CSS classes already exist -->
+      <div id="tier-status" class="tier-status" aria-label="Corpus tier status">
+        <div class="tier" data-tier="HOT">
+          <span class="tier-led" data-status="unknown"></span>
+          <span class="tier-name">HOT</span>
+          <span class="tier-meta">on-device · always</span>
+        </div>
+        <div class="tier" data-tier="WARM">
+          <span class="tier-led" data-status="unknown"></span>
+          <span class="tier-name">WARM</span>
+          <span class="tier-meta">on-base · NIPR</span>
+        </div>
+        <div class="tier" data-tier="COLD">
+          <span class="tier-led" data-status="unknown"></span>
+          <span class="tier-name">COLD</span>
+          <span class="tier-meta">cloud · FedRAMP</span>
+        </div>
+      </div>
+
+      <div class="console__body">
+        <!-- Mic + state -->
+        <div class="mic-area">
+          <div class="state-row">
+            <div id="state-indicator" data-state="idle"></div>
+            <div id="state-label">Press start to begin</div>
+          </div>
+
+          <div class="voice-controls">
+            <button id="start-btn" type="button" class="btn btn--primary">
+              <span class="btn__label">Start voice</span>
+              <span class="btn__icon" aria-hidden="true">●</span>
+            </button>
+            <button id="mute-btn" type="button" class="btn btn--ghost">
+              <span class="btn__label">Mute / interrupt</span>
+            </button>
+          </div>
+
+          <p id="transcript" class="transcript"></p>
+
+          <p id="mic-hint" class="hint">
+            Try: <em>"I need to file leave for ten days starting June 3."</em>
+          </p>
+
+          <details class="fallback">
+            <summary>Push-to-talk fallback</summary>
+            <button id="fallback-mic" type="button" aria-label="Hold to talk">
+              <span class="mic-icon">●</span>
+              <span class="mic-label">Hold to talk</span>
+            </button>
+            <p>Use only if continuous voice fails at the venue.</p>
+          </details>
+        </div>
+
+        <!-- Reply pane -->
+        <section class="reply" id="reply" hidden>
+          <div class="reply__head">
+            <h3>Adjutant says</h3>
+            <span class="reply__pill mono">RETRIEVAL-GROUNDED</span>
+          </div>
+          <p id="spoken-summary" class="reply__spoken"></p>
+
+          <h4 class="reply__sub">Citations</h4>
+          <ul id="citations" class="citations"></ul>
+
+          <div id="form-section" class="forms-out" hidden></div>
+        </section>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- Pipeline                                                      -->
+  <!-- ============================================================ -->
+  <section class="section section--pipeline" id="pipeline">
+    <div class="section__head">
+      <span class="eyebrow">§ 03 · The pipeline</span>
+      <h2 class="section__title" data-reveal>
+        Five stages.
+        <span class="hl">All on the laptop. All offline.</span>
+      </h2>
+    </div>
+
+    <ol class="pipeline">
+      <li class="stage" data-reveal>
+        <div class="stage__num mono">01</div>
+        <h3 class="stage__title">STT</h3>
+        <p class="stage__model mono">faster-whisper · small.en · int8</p>
+        <p class="stage__copy">
+          Browser mic captured by AudioWorklet, downsampled to 16 kHz PCM16,
+          streamed over WebSocket. Silero VAD gates the turn. Whisper transcribes
+          on CPU in ~300 ms.
+        </p>
+      </li>
+      <li class="stage" data-reveal>
+        <div class="stage__num mono">02</div>
+        <h3 class="stage__title">RAG</h3>
+        <p class="stage__model mono">FAISS · MiniLM-L6 · threshold 0.35</p>
+        <p class="stage__copy">
+          Curated corpus — AR 600-8-10, AR 27-10, AR 623-3, AR 735-5, JTR 2025,
+          DA Pam 600-25, FM 6-22. Below-threshold queries return zero chunks
+          and the LLM is forced to refuse.
+        </p>
+      </li>
+      <li class="stage" data-reveal>
+        <div class="stage__num mono">03</div>
+        <h3 class="stage__title">LLM</h3>
+        <p class="stage__model mono">llama3.2 · 3B · Ollama · streaming</p>
+        <p class="stage__copy">
+          Constrained-context prompt: must cite by section/paragraph. Streams
+          token-by-token; the sentence buffer flushes the moment a terminator
+          hits, so the first audio leaves the server while sentence #2 is still
+          generating.
+        </p>
+      </li>
+      <li class="stage" data-reveal>
+        <div class="stage__num mono">04</div>
+        <h3 class="stage__title">PDF fill</h3>
+        <p class="stage__model mono">pikepdf · reportlab overlay · per-diem math</p>
+        <p class="stage__copy">
+          AcroForm fill is primary; reportlab text-on-coordinates handles
+          DA-31's XFA-only PDF. GSA per-diem math runs in deterministic Python
+          — never trusted to the LLM.
+        </p>
+      </li>
+      <li class="stage" data-reveal>
+        <div class="stage__num mono">05</div>
+        <h3 class="stage__title">TTS</h3>
+        <p class="stage__model mono">Kokoro-82M · ONNX · af_heart · 24 kHz</p>
+        <p class="stage__copy">
+          Pre-rendered "checking the regs" cue plays within ~50 ms of
+          end-of-speech, masking the LLM-prefill gap. Real reply chains in
+          sentence-by-sentence behind it. Total ESV→FAO ≤ 1.4 s on M2.
+        </p>
+      </li>
+    </ol>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- Forms                                                         -->
+  <!-- ============================================================ -->
+  <section class="section section--forms" id="forms">
+    <div class="section__head">
+      <span class="eyebrow">§ 04 · Forms supported</span>
+      <h2 class="section__title" data-reveal>
+        Three forms.
+        <span class="hl">The daily 80% of a junior NCO's paperwork.</span>
+      </h2>
+    </div>
+
+    <div class="form-cards">
+      <article class="form-card" data-reveal>
+        <header class="form-card__head">
+          <span class="form-card__id mono">DA-31</span>
+          <span class="form-card__reg mono">AR 600-8-10</span>
+        </header>
+        <h3 class="form-card__title">Request and Authority for Leave</h3>
+        <p class="form-card__copy">
+          The most-touched form in the Army. XFA-only ("Please wait" page
+          renders for non-Adobe viewers) — Adjutant uses a hand-tuned reportlab
+          coordinate-overlay engine to populate it.
+        </p>
+        <ul class="form-card__meta mono">
+          <li>type · XFA</li>
+          <li>engine · reportlab overlay</li>
+          <li>reg · ¶ 4-3 leave authorization</li>
+        </ul>
+      </article>
+
+      <article class="form-card" data-reveal>
+        <header class="form-card__head">
+          <span class="form-card__id mono">DD-1351-2</span>
+          <span class="form-card__reg mono">JTR 2025</span>
+        </header>
+        <h3 class="form-card__title">Travel Voucher</h3>
+        <p class="form-card__copy">
+          Hybrid XFA + AcroForm. Adjutant strips the /XFA layer so Preview and
+          Chrome render the AcroForm fill directly. Per-diem math runs in
+          Python from a GSA rate table — not the LLM.
+        </p>
+        <ul class="form-card__meta mono">
+          <li>type · hybrid XFA / AcroForm</li>
+          <li>engine · pikepdf field-fill</li>
+          <li>math · GSA per-diem (deterministic)</li>
+        </ul>
+      </article>
+
+      <article class="form-card" data-reveal>
+        <header class="form-card__head">
+          <span class="form-card__id mono">DA-4856</span>
+          <span class="form-card__reg mono">AR 623-3</span>
+        </header>
+        <h3 class="form-card__title">Developmental Counseling</h3>
+        <p class="form-card__copy">
+          Required after almost every personnel action. AcroForm-mostly, fills
+          via pikepdf. Adjutant cites the AR 623-3 evaluation reporting
+          framework on the response side.
+        </p>
+        <ul class="form-card__meta mono">
+          <li>type · AcroForm</li>
+          <li>engine · pikepdf primary</li>
+          <li>reg · evaluation reporting system</li>
+        </ul>
+      </article>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- The wow moment                                                -->
+  <!-- ============================================================ -->
+  <section class="section section--wow">
+    <span class="eyebrow" data-reveal>§ 05 · The wow moment</span>
+    <blockquote class="wow" data-reveal>
+      <p class="wow__quote">
+        <span>"I'm going to JRTC at Fort Polk July 14 for five days,</span>
+        <span>need to counsel SPC Garcia tomorrow,</span>
+        <span>and want two days of leave when I get back."</span>
+      </p>
+      <footer class="wow__attrib">
+        <span class="mono">→</span>
+        <span>One voice request.</span>
+        <span class="hl">Three filled PDFs.</span>
+      </footer>
+    </blockquote>
+
+    <div class="wow__forms" data-reveal>
+      <span class="wow__pill">DD-1351-2</span>
+      <span class="wow__plus">+</span>
+      <span class="wow__pill">DA-4856</span>
+      <span class="wow__plus">+</span>
+      <span class="wow__pill">DA-31</span>
+    </div>
+    <p class="wow__caption" data-reveal>
+      No competing tool — GenAI.mil, CamoGPT, Ask Sage, Milnerva, EdgeRunner —
+      does this. Adjutant's <code>_infer_forms</code> classifier reads action
+      verbs and date phrases out of one sentence, then runs three independent
+      schema-extraction passes in parallel.
+    </p>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- Comparison                                                    -->
+  <!-- ============================================================ -->
+  <section class="section section--compare" id="compare">
+    <div class="section__head">
+      <span class="eyebrow">§ 06 · The unfilled cell</span>
+      <h2 class="section__title" data-reveal>
+        Every other tool sits in
+        <span class="hl">at most two columns of this matrix.</span>
+      </h2>
+      <p class="section__sub" data-reveal>
+        Voice-first + offline + multi-AR cited + auto-fills the actual DA-form
+        PDF + end-to-end persona flow + hands-free. EdgeRunner ($12M Series A)
+        is the only on-device peer — and they serve tactical SOF doctrine, not
+        the bureaucratic tail.
+      </p>
+    </div>
+
+    <div class="matrix-wrap" data-reveal>
+      <table class="matrix">
+        <thead>
+          <tr>
+            <th></th>
+            <th>GenAI.mil</th>
+            <th>CamoGPT</th>
+            <th>Ask Sage</th>
+            <th>Milnerva</th>
+            <th>SergeantAI</th>
+            <th>EdgeRunner</th>
+            <th class="us">Adjutant</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th>Voice I/O</th>
+            <td class="no">—</td>
+            <td class="no">—</td>
+            <td class="no">—</td>
+            <td class="no">—</td>
+            <td class="no">—</td>
+            <td class="partial">listens</td>
+            <td class="us yes">conversational</td>
+          </tr>
+          <tr>
+            <th>Offline</th>
+            <td class="no">—</td>
+            <td class="no">—</td>
+            <td class="no">—</td>
+            <td class="no">—</td>
+            <td class="no">—</td>
+            <td class="yes">tactical</td>
+            <td class="us yes">admin</td>
+          </tr>
+          <tr>
+            <th>Cites Reg by section</th>
+            <td class="partial">generic</td>
+            <td class="partial">generic</td>
+            <td class="partial">generic</td>
+            <td class="partial">partial</td>
+            <td class="partial">one AR</td>
+            <td class="partial">generic</td>
+            <td class="us yes">multi-AR + FM</td>
+          </tr>
+          <tr>
+            <th>Auto-fills DA-form PDF</th>
+            <td class="no">—</td>
+            <td class="no">—</td>
+            <td class="no">—</td>
+            <td class="no">—</td>
+            <td class="no">—</td>
+            <td class="no">—</td>
+            <td class="us yes">yes</td>
+          </tr>
+          <tr>
+            <th>End-to-end persona flow</th>
+            <td class="no">—</td>
+            <td class="no">—</td>
+            <td class="no">—</td>
+            <td class="no">—</td>
+            <td class="no">—</td>
+            <td class="no">—</td>
+            <td class="us yes">SGT Chen</td>
+          </tr>
+          <tr>
+            <th>Hands-free</th>
+            <td class="no">—</td>
+            <td class="no">—</td>
+            <td class="no">—</td>
+            <td class="no">—</td>
+            <td class="no">—</td>
+            <td class="no">—</td>
+            <td class="us yes">yes</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- Architectural claims                                          -->
+  <!-- ============================================================ -->
+  <section class="section section--claims" id="offline">
+    <div class="section__head">
+      <span class="eyebrow">§ 07 · Architectural claims</span>
+      <h2 class="section__title" data-reveal>
+        Three things that are not
+        <span class="hl">demo-day theater.</span>
+      </h2>
+    </div>
+
+    <div class="claims">
+      <article class="claim" data-reveal>
+        <span class="claim__num mono">a.</span>
+        <h3>Architecturally offline.</h3>
+        <p>
+          Whisper, Llama, Kokoro, FAISS, MiniLM — all loaded from disk at
+          startup. The wifi cable comes out before the demo starts. The
+          browser badge flips to <span class="mono offline-tag">OFFLINE</span>
+          and nothing changes about the response.
+        </p>
+      </article>
+
+      <article class="claim" data-reveal>
+        <span class="claim__num mono">b.</span>
+        <h3>Architecturally cited.</h3>
+        <p>
+          Every spoken summary ships with verbatim source quotes — section,
+          paragraph, AR number. The citation panel populates before the audio
+          starts. Mohindra's hallucination probe is answered with a panel, not
+          a promise.
+        </p>
+      </article>
+
+      <article class="claim" data-reveal>
+        <span class="claim__num mono">c.</span>
+        <h3>Architecturally refuses.</h3>
+        <p>
+          A retrieval threshold of 0.35 means out-of-corpus questions return
+          zero chunks. The LLM is then handed a hard refusal contract — it is
+          structurally incapable of answering with what it doesn't have.
+          Side-by-side with GenAI.mil's hosted Gemini, it is the difference
+          between "I don't have AR 27-10 in my corpus" and a confident
+          fabricated paragraph number.
+        </p>
+      </article>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- Persona                                                       -->
+  <!-- ============================================================ -->
+  <section class="section section--persona">
+    <div class="persona" data-reveal>
+      <div class="persona__chrome">
+        <span class="eyebrow">§ 08 · Persona</span>
+        <span class="mono persona__id">PERSONNEL FILE · 2026-04-25</span>
+      </div>
+      <div class="persona__grid">
+        <div class="persona__photo" aria-hidden="true">
+          <span class="persona__rank mono">E-5</span>
+        </div>
+        <div class="persona__body">
+          <h2 class="persona__name">SGT Maya Chen</h2>
+          <p class="persona__role">82nd Airborne · Fort Bragg · Infantry Squad Leader</p>
+          <p class="persona__copy">
+            Six years in service. Has filed seventeen DA-31s, eleven DD-1351-2s,
+            and lost count of the DA-4856s. Carries her phone in the cargo pocket
+            of her ACUs. Speaks the way she'd speak to her S1 — and her S1 has
+            forty other soldiers in the chain.
+          </p>
+          <dl class="persona__sheet">
+            <div><dt>Voice query</dt><dd>"I need ten days of ordinary leave starting June 3, going to my sister's wedding in Atlanta. Emergency contact Maria Chen, 919-555-0144."</dd></div>
+            <div><dt>Adjutant returns</dt><dd>DA-31 cited at AR 600-8-10 ¶ 4-3, signed-ready PDF, ~6 s end-to-end.</dd></div>
+          </dl>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- Final CTA                                                     -->
+  <!-- ============================================================ -->
+  <section class="section section--cta">
+    <h2 class="cta__title" data-reveal>
+      <span>Speak it.</span>
+      <span>Sign it.</span>
+      <span class="hl">Move out.</span>
+    </h2>
+    <div class="cta__actions" data-reveal>
+      <a href="#demo" class="btn btn--primary btn--xl" data-magnetic>
+        <span class="btn__label">Run the live demo</span>
+        <span class="btn__icon" aria-hidden="true">▶</span>
+      </a>
+      <a href="https://github.com" class="btn btn--ghost btn--xl" data-magnetic>
+        <span>Source on GitHub</span>
+        <span class="btn__icon" aria-hidden="true">↗</span>
+      </a>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- Footer                                                        -->
+  <!-- ============================================================ -->
+  <footer class="foot">
+    <div class="foot__row">
+      <span class="foot__brand mono">▌Adjutant · v0.1</span>
+      <span class="foot__meta">Charlie Mike · SCSP Hackathon Boston · GenAI.mil track · April 2026</span>
+    </div>
+    <div class="foot__row foot__row--small">
+      <span>Built on a 2025 8 GB MacBook Air M1.</span>
+      <span>Whisper · Llama 3.2 · Kokoro 82M · Silero VAD · FAISS · pikepdf · reportlab.</span>
+      <span>The Sabi voice pipeline, ported.</span>
+    </div>
   </footer>
 
-  <script src="/web/app.js"></script>
+  <script src="/web/marketing.js" defer></script>
+  <script src="/web/app.js" defer></script>
 </body>
 </html>
