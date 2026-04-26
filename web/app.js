@@ -94,6 +94,7 @@ function setState(name) {
   stateEl.style.background = s.color;
   stateLabelEl.textContent = s.label;
   stateEl.dataset.state = name;
+  if (orbHandle) orbHandle.setState(name);
 }
 
 // ---------------------------------------------------------------------------
@@ -206,7 +207,54 @@ function detachMicAnalyser() {
   micAnalyser = null;
 }
 
+// ----- WebGL2 orb (ElevenLabs / ChatGPT-web port) -----
+// Defined in /web/voice-orb.js. We init lazily (first audio interaction)
+// and expose the handle so setState + AnalyserNode reads can drive it.
+let orbHandle = null;
+async function ensureOrb() {
+  if (orbHandle) return orbHandle;
+  const canvas = document.getElementById("voice-orb");
+  if (!canvas) return null;
+  try {
+    const mod = await import("/web/voice-orb.js");
+    orbHandle = mod.initVoiceOrb(canvas);
+    if (orbHandle) {
+      orbHandle.setState(currentState);
+      // Volume polling — runs alongside the orb's own RAF
+      const micBuf = new Uint8Array(256);
+      const botBuf = new Uint8Array(256);
+      function pollVol() {
+        const micL = (currentState === "listening" || currentState === "speaking_user")
+                     ? readVoiceLevel(micAnalyser, micBuf) : 0;
+        const botL = (currentState === "speaking")
+                     ? readVoiceLevel(botAnalyser, botBuf) : 0;
+        orbHandle.updateVolume(micL, botL);
+        requestAnimationFrame(pollVol);
+      }
+      requestAnimationFrame(pollVol);
+    }
+  } catch (e) {
+    console.warn("[orb] init failed:", e);
+  }
+  return orbHandle;
+}
+function readVoiceLevel(analyser, buf) {
+  if (!analyser || !analyser.getByteFrequencyData) return 0;
+  analyser.getByteFrequencyData(buf);
+  let sum = 0;
+  const lo = 10, hi = Math.min(40, buf.length);
+  for (let i = lo; i < hi; i++) sum += buf[i];
+  const avg = sum / (hi - lo) / 255;
+  return Math.max(0, Math.min(1, (avg - 0.06) / 0.6));
+}
+
+// Old Canvas2D startOrb retained as a no-op fallback in case ensureOrb()
+// rejects (no WebGL2 support). The page just shows an empty canvas — the
+// rest of the demo still works.
 function startOrb() {
+  ensureOrb();
+}
+function _legacyCanvas2DOrbDisabled() {
   const canvas = document.getElementById("voice-orb");
   if (!canvas || orbRafHandle) return;
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -605,3 +653,8 @@ if (fallbackBtn) {
 }
 
 setState("idle");
+
+// Boot the WebGL orb on page load so visitors see a live idle disc
+// before they ever click the mic. Non-blocking; gracefully no-ops on
+// browsers without WebGL2.
+ensureOrb();
