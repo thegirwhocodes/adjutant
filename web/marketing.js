@@ -1,11 +1,26 @@
-// Adjutant marketing-page interactions.
-// Pure vanilla. Coexists with app.js — touches none of the live-demo IDs.
+// Adjutant marketing page interactions.
+// Vanilla. No dependencies. Coexists with app.js.
+//
+// Responsibilities:
+//   1. Reveal-on-scroll (IntersectionObserver) — only for elements
+//      below the fold; the hero is always visible at first paint.
+//   2. Sticky-nav hide-on-scroll-down / show-on-scroll-up.
+//   3. Marquee population.
+//   4. Live latency meter — wraps WebSocket so any /ws/voice connection
+//      is timed end-of-speech → first-audio-out.
+//   5. "Simulate offline" toggle that flips the badge for 8 s without
+//      breaking the demo connection.
+//   6. Tasteful hero parallax that pauses once the title leaves the fold.
+//
+// Removed (per design audit): cursor dot, magnetic buttons, grain layer.
 
 (() => {
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
   // -----------------------------------------------------------
   // 1. Reveal on scroll
   // -----------------------------------------------------------
-  const reveals = document.querySelectorAll("[data-reveal]");
+  const reveals = document.querySelectorAll(".reveal");
   if ("IntersectionObserver" in window && reveals.length) {
     const io = new IntersectionObserver(
       (entries) => {
@@ -38,20 +53,13 @@
       last = y;
       ticking = false;
     };
-    window.addEventListener(
-      "scroll",
-      () => {
-        if (!ticking) {
-          requestAnimationFrame(onScroll);
-          ticking = true;
-        }
-      },
-      { passive: true }
-    );
+    window.addEventListener("scroll", () => {
+      if (!ticking) { requestAnimationFrame(onScroll); ticking = true; }
+    }, { passive: true });
   }
 
   // -----------------------------------------------------------
-  // 3. Marquee populate — corpus regulations indexed
+  // 3. Marquee — corpus regulations
   // -----------------------------------------------------------
   const track = document.getElementById("marqueeTrack");
   if (track) {
@@ -74,106 +82,118 @@
       "DA-31 · Leave Form",
       "DA-4856 · Counseling",
     ];
-    // Duplicate twice for seamless infinite loop.
     const html = items.map((t) => `<span>${t}</span>`).join("");
     track.innerHTML = html + html;
   }
 
   // -----------------------------------------------------------
-  // 4. Magnetic buttons (cursor-pull)
+  // 4. Live latency meter
+  //
+  // Wrap window.WebSocket so any /ws/voice connection auto-instruments
+  // round-trip from USER_DONE → first audio chunk (binary frame).
   // -----------------------------------------------------------
-  const magnets = document.querySelectorAll("[data-magnetic]");
-  const isFinePointer =
-    window.matchMedia &&
-    window.matchMedia("(hover: hover) and (pointer: fine)").matches;
-  if (isFinePointer) {
-    magnets.forEach((el) => {
-      const STRENGTH = 0.25;
-      el.addEventListener("mousemove", (ev) => {
-        const r = el.getBoundingClientRect();
-        const x = ev.clientX - (r.left + r.width / 2);
-        const y = ev.clientY - (r.top + r.height / 2);
-        el.style.transform = `translate(${x * STRENGTH}px, ${y * STRENGTH}px)`;
-      });
-      el.addEventListener("mouseleave", () => {
-        el.style.transform = "";
-      });
-    });
+  const latencyEl = document.getElementById("latency-ms");
+  function setLatency(ms) {
+    if (!latencyEl) return;
+    latencyEl.textContent = String(Math.round(ms));
   }
 
-  // -----------------------------------------------------------
-  // 5. Cursor dot
-  // -----------------------------------------------------------
-  const dot = document.querySelector(".cursor-dot");
-  if (dot && isFinePointer) {
-    let x = 0, y = 0, tx = 0, ty = 0;
-    let rafId = null;
-    document.addEventListener("mouseenter", () => dot.classList.add("active"));
-    document.addEventListener("mouseleave", () => dot.classList.remove("active"));
-    document.addEventListener("mousemove", (ev) => {
-      tx = ev.clientX;
-      ty = ev.clientY;
-      if (!dot.classList.contains("active")) dot.classList.add("active");
-      if (!rafId) rafId = requestAnimationFrame(loop);
-    });
-    function loop() {
-      x += (tx - x) * 0.22;
-      y += (ty - y) * 0.22;
-      dot.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, -50%)`;
-      if (Math.abs(tx - x) > 0.1 || Math.abs(ty - y) > 0.1) {
-        rafId = requestAnimationFrame(loop);
-      } else {
-        rafId = null;
-      }
+  if (latencyEl && "WebSocket" in window) {
+    const NativeWS = window.WebSocket;
+    function WrappedWS(url, protocols) {
+      const ws = protocols ? new NativeWS(url, protocols) : new NativeWS(url);
+      // Only instrument the voice WebSocket
+      try {
+        const u = new URL(url, window.location.origin);
+        if (!u.pathname.includes("/ws/voice")) return ws;
+      } catch (_) {}
+
+      let userDoneAt = null;
+      let firstAudioCounted = false;
+
+      ws.addEventListener("message", (ev) => {
+        try {
+          if (typeof ev.data === "string") {
+            const obj = JSON.parse(ev.data);
+            if (obj && obj.type === "USER_DONE") {
+              userDoneAt = performance.now();
+              firstAudioCounted = false;
+            }
+          } else if (userDoneAt && !firstAudioCounted) {
+            // First binary frame after USER_DONE = first audio out
+            const ms = performance.now() - userDoneAt;
+            setLatency(ms);
+            firstAudioCounted = true;
+          }
+        } catch (_) {}
+      });
+      return ws;
     }
-    // Hover targets — anything interactive enlarges the dot.
-    const hoverTargets = document.querySelectorAll(
-      "a, button, [data-magnetic], summary, .form-card, .stage, .stat, .claim"
-    );
-    hoverTargets.forEach((t) => {
-      t.addEventListener("mouseenter", () => dot.classList.add("hover"));
-      t.addEventListener("mouseleave", () => dot.classList.remove("hover"));
+    WrappedWS.prototype = NativeWS.prototype;
+    WrappedWS.CONNECTING = NativeWS.CONNECTING;
+    WrappedWS.OPEN       = NativeWS.OPEN;
+    WrappedWS.CLOSING    = NativeWS.CLOSING;
+    WrappedWS.CLOSED     = NativeWS.CLOSED;
+    window.WebSocket = WrappedWS;
+  }
+
+  // -----------------------------------------------------------
+  // 5. Simulate-offline toggle
+  // -----------------------------------------------------------
+  const simBtn = document.getElementById("sim-offline");
+  const netBadge = document.getElementById("net-status");
+  if (simBtn && netBadge) {
+    simBtn.addEventListener("click", () => {
+      if (simBtn.classList.contains("simulating")) return;
+      simBtn.classList.add("simulating");
+      simBtn.textContent = "● simulating offline";
+      const prevText = netBadge.textContent;
+      const prevClass = netBadge.className;
+      netBadge.textContent = "OFFLINE — still working";
+      netBadge.className = "badge offline";
+      setTimeout(() => {
+        netBadge.textContent = prevText;
+        netBadge.className = prevClass;
+        simBtn.classList.remove("simulating");
+        simBtn.textContent = "⏻ Simulate offline";
+      }, 8000);
     });
   }
 
   // -----------------------------------------------------------
-  // 6. Hero parallax — title drifts up on scroll
+  // 6. Hero parallax (subtle, paused after fold)
   // -----------------------------------------------------------
   const heroTitle = document.querySelector(".hero__title");
-  if (heroTitle && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+  if (heroTitle && !reduceMotion) {
     let ticking = false;
-    window.addEventListener(
-      "scroll",
-      () => {
-        if (!ticking) {
-          requestAnimationFrame(() => {
-            const y = Math.min(window.scrollY, 600);
-            heroTitle.style.transform = `translate3d(0, ${y * 0.18}px, 0)`;
-            heroTitle.style.opacity = String(Math.max(0, 1 - y / 700));
-            ticking = false;
-          });
-          ticking = true;
-        }
-      },
-      { passive: true }
-    );
+    window.addEventListener("scroll", () => {
+      if (window.scrollY > window.innerHeight) return;
+      if (!ticking) {
+        requestAnimationFrame(() => {
+          const y = Math.min(window.scrollY, 600);
+          heroTitle.style.transform = `translate3d(0, ${y * 0.12}px, 0)`;
+          ticking = false;
+        });
+        ticking = true;
+      }
+    }, { passive: true });
   }
 
   // -----------------------------------------------------------
-  // 7. Smooth-scroll for internal anchors (respects prefers-reduced-motion)
+  // 7. Smooth-scroll for in-page anchors (respects reduced-motion)
   // -----------------------------------------------------------
   document.querySelectorAll('a[href^="#"]').forEach((a) => {
     a.addEventListener("click", (ev) => {
       const id = a.getAttribute("href").slice(1);
-      const target = id ? document.getElementById(id) : null;
+      if (!id) return;
+      const target = document.getElementById(id);
       if (!target) return;
       ev.preventDefault();
       target.scrollIntoView({
-        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
-          ? "auto"
-          : "smooth",
+        behavior: reduceMotion ? "auto" : "smooth",
         block: "start",
       });
+      target.focus({ preventScroll: true });
     });
   });
 })();

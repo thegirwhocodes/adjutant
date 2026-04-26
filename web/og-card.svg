@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" font-family="ui-sans-serif,-apple-system,Helvetica,Arial,sans-serif">
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="-10%" r="80%">
+      <stop offset="0%" stop-color="#6b8e23" stop-opacity="0.35"/>
+      <stop offset="60%" stop-color="#0a0a0a" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="rule" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#25241c" stop-opacity="0"/>
+      <stop offset="20%" stop-color="#25241c"/>
+      <stop offset="80%" stop-color="#25241c"/>
+      <stop offset="100%" stop-color="#25241c" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="630" fill="#0a0a0a"/>
+  <rect width="1200" height="630" fill="url(#glow)"/>
+
+  <!-- Top spec strip -->
+  <text x="80" y="80" fill="#8a847a" font-size="16" letter-spacing="2.5" font-family="ui-monospace,SF Mono,Menlo,monospace">
+    CHARLIE MIKE / SCSP HACKATHON · BOSTON 2026 / GENAI.MIL TRACK
+  </text>
+  <circle cx="64" cy="74" r="4" fill="#8db04a"/>
+  <line x1="80" y1="100" x2="1120" y2="100" stroke="url(#rule)" stroke-width="1"/>
+
+  <!-- Brand mark -->
+  <rect x="80" y="150" width="14" height="80" fill="#8db04a"/>
+  <text x="108" y="220" fill="#ece7dc" font-size="56" font-weight="600" letter-spacing="-2">Adjutant</text>
+
+  <!-- Headline -->
+  <text x="80" y="340" fill="#ece7dc" font-size="92" font-weight="600" letter-spacing="-4">Speak it. Sign it.</text>
+  <text x="80" y="430" font-size="92" font-weight="400" letter-spacing="-3.5"
+        font-family="Iowan Old Style, Charter, Georgia, serif" font-style="italic" fill="#d2cdc1">Move out.</text>
+
+  <!-- Subhead -->
+  <text x="80" y="495" fill="#d2cdc1" font-size="26">Voice-first AI. Cites the regulation. Fills the form.</text>
+  <text x="80" y="528" fill="#d2cdc1" font-size="26">Runs on a laptop. <tspan fill="#d4a85a">No internet required.</tspan></text>
+
+  <!-- Bottom strip -->
+  <line x1="80" y1="570" x2="1120" y2="570" stroke="url(#rule)" stroke-width="1"/>
+  <text x="80" y="600" fill="#8a847a" font-size="14" letter-spacing="2" font-family="ui-monospace,SF Mono,Menlo,monospace">
+    OFFLINE · CITED · REFUSES — LIVE AT ADJUTANT.LOCAL
+  </text>
+  <text x="1120" y="600" fill="#d4a85a" font-size="14" letter-spacing="2" text-anchor="end" font-family="ui-monospace,SF Mono,Menlo,monospace">
+    LAT 42.36° / LON -71.06°
+  </text>
+</svg>
