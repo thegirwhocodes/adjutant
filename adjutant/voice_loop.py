@@ -590,6 +590,13 @@ class VoiceLoop:
                 extract_form_data, transcript, chunks, schema
             )
             form_data = extraction.get("data") or {}
+            # Demo safety: merge soldier profile defaults for any blank
+            # required field (name/rank/unit/SSN/phone). Voice request
+            # only supplies what's NEW for this form (dates, location,
+            # leave type) — the soldier's identity comes from
+            # ~/.adjutant/profile.json.
+            from adjutant.profile import merge_profile_defaults
+            form_data = merge_profile_defaults(form_data, list(schema["fields"]))
             if fid == "DA-31":
                 _correct_leave_type(form_data, transcript)
             if fid == "DD-1351-2":

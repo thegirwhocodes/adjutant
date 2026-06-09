@@ -187,10 +187,11 @@ async def query(req: QueryRequest):
     chunks = await retrieve_tiered(req.query, top_k=top_k)
     log.info(f"Retrieved {len(chunks)} chunks for: {req.query!r}")
 
-    # 2. Generate grounded answer
-    answer = answer_query(req.query, chunks)
-
-    # 3. Determine which forms to generate.
+    # 2. Determine which forms to generate FIRST, so we can skip the
+    #    redundant `answer_query` LLM call when forms are being filled.
+    #    The form-fill path is what matters for the browser iframe;
+    #    the LLM-narrated summary doubles total latency from ~30s to
+    #    ~75s on M2 because Ollama serializes both calls.
     if req.form_id is None:
         target_forms = _infer_forms(req.query)
     elif isinstance(req.form_id, list):
@@ -199,7 +200,22 @@ async def query(req: QueryRequest):
         target_forms = [req.form_id]
 
     if target_forms:
-        log.info(f"Generating {len(target_forms)} form(s): {target_forms}")
+        log.info(f"Generating {len(target_forms)} form(s) — skipping answer_query for speed")
+        from adjutant.text_utils import clean_citation_quote
+        answer = {
+            "spoken_summary": "",  # filled deterministically below after we know what landed
+            "citations": [
+                {
+                    "source": c.get("source", "unknown"),
+                    "section": c.get("section", ""),
+                    "quote": clean_citation_quote(c.get("text", "")),
+                }
+                for c in chunks
+            ],
+        }
+    else:
+        # Pure Q&A — no form to fill, so the spoken summary is the value.
+        answer = answer_query(req.query, chunks)
 
     # 4. Iterate: extract → post-process → fill PDF for each form.
     results: list[FormResult] = []
@@ -213,6 +229,12 @@ async def query(req: QueryRequest):
         extraction = extract_form_data(req.query, chunks, schema)
         form_data = extraction.get("data") or {}
         missing = extraction.get("missing_fields", [])
+
+        # Demo safety net: merge soldier profile defaults for any blank
+        # field. Voice request only supplies what's NEW (dates, location);
+        # name / rank / unit / SSN / phone come from ~/.adjutant/profile.json.
+        from adjutant.profile import merge_profile_defaults
+        form_data = merge_profile_defaults(form_data, list(schema["fields"]))
 
         # Per-form post-processing
         if fid == "DA-31":
@@ -240,14 +262,29 @@ async def query(req: QueryRequest):
             pdf_url=pdf_url,
         ))
 
-    # 5. Synthesize spoken summary
+    # 5. Build a fast deterministic spoken summary when forms were filled
+    #    (skipping the LLM narration call we omitted in step 2). For pure
+    #    Q&A we already have answer_query's reply.
+    if results and not answer["spoken_summary"]:
+        from adjutant.voice_loop import VoiceLoop
+        try:
+            r0 = results[0]
+            schema0 = get_schema(r0.form_id)
+            answer["spoken_summary"] = VoiceLoop._template_form_summary(
+                None, r0.form_id, r0.form_data, r0.missing_fields, chunks
+            )
+        except Exception as e:
+            log.warning(f"summary template failed: {e}")
+            answer["spoken_summary"] = (
+                f"{r0.form_id} drafted. "
+                + (f"Still need {', '.join(r0.missing_fields[:3])}."
+                   if r0.missing_fields else "Form is complete.")
+            )
+
+    # Skip TTS audio synthesis on /query — the WebSocket /ws/voice path
+    # handles spoken output. Synthesizing here adds 1–3 s for nothing
+    # the iframe can use.
     audio_url = None
-    try:
-        audio_path = AUDIO_DIR / f"reply-{uuid.uuid4().hex[:8]}.wav"
-        synthesize(answer["spoken_summary"], str(audio_path))
-        audio_url = f"/audio/{audio_path.name}"
-    except Exception as e:
-        log.warning(f"TTS failed (non-fatal): {e}")
 
     # Backwards-compat: populate legacy single-form fields from forms[0].
     legacy_data = results[0].form_data if results else None

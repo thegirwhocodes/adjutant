@@ -117,6 +117,67 @@ def set_sensitive(field: str, value: str) -> None:
             cur = {}
     cur[field] = value
     SENSITIVE_FALLBACK_PATH.write_text(json.dumps(cur, indent=2, sort_keys=True))
+
+
+# ---------------------------------------------------------------------------
+# Demo-safety: merge profile values into a form_data dict for any field
+# the LLM didn't fill. Soldier's identity is on file — voice request only
+# supplies what's NEW (dates, location, leave type). This is the safety
+# net that makes the demo bulletproof when extraction is partial.
+# ---------------------------------------------------------------------------
+
+def merge_profile_defaults(form_data: dict, schema_field_names: list[str]) -> dict:
+    """Fill any blank schema field with the corresponding profile value.
+
+    `form_data` may be partially populated by the LLM; we don't overwrite
+    anything the LLM already extracted. We only fill fields that are
+    blank/None/empty, and only fields that exist in the schema.
+
+    Schema-name → profile-path mapping is hardcoded for the three forms
+    Adjutant supports today (DA-31, DD-1351-2, DA-4856).
+    """
+    profile = load_profile()
+    soldier = (profile.get("soldier") or {}) if profile else {}
+    unit_blk = (profile.get("unit") or {}) if profile else {}
+
+    full_name = ""
+    if soldier:
+        last  = soldier.get("name_last", "")
+        first = soldier.get("name_first", "")
+        mid   = soldier.get("name_middle", "")
+        if last or first:
+            full_name = f"{last.upper()}, {first} {mid}".strip()
+
+    profile_defaults = {
+        # DA-31 / DD-1351-2 / DA-4856 share these
+        "name":              full_name,
+        "rank":              soldier.get("rank", ""),
+        "unit":              unit_blk.get("name", "") or unit_blk.get("duty_station", ""),
+        "duty_station":      unit_blk.get("duty_station", ""),
+        "ssn":               soldier.get("ssn_last4", ""),
+        "leave_phone":       soldier.get("phone_commercial", ""),
+        "phone":             soldier.get("phone_commercial", ""),
+        "email":             soldier.get("email", ""),
+        "dodid":             soldier.get("dodid", ""),
+    }
+
+    # Sensitive — keychain / sidecar
+    ec_name = get_sensitive("emergency_contact_name") or ""
+    ec_rel  = get_sensitive("emergency_contact_relation") or ""
+    ec_ph   = get_sensitive("emergency_contact_phone") or ""
+    if ec_name or ec_ph:
+        ec_str = ec_name
+        if ec_rel:
+            ec_str = f"{ec_str} ({ec_rel})" if ec_str else f"({ec_rel})"
+        if ec_ph:
+            ec_str = f"{ec_str} {ec_ph}".strip() if ec_str else ec_ph
+        profile_defaults["emergency_contact"] = ec_str
+
+    out = dict(form_data) if form_data else {}
+    for fname in schema_field_names:
+        if not out.get(fname) and profile_defaults.get(fname):
+            out[fname] = profile_defaults[fname]
+    return out
     os.chmod(SENSITIVE_FALLBACK_PATH, 0o600)
 
 

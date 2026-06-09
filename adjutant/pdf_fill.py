@@ -443,27 +443,42 @@ def _try_aspose_fill(template: Path, data: dict, out: Path,
                 log.warning(f"aspose: license rejected: {e}")
 
         with ap.Document(str(template)) as doc:
-            # Translate semantic keys → XFA names.
-            xfa_data = {semantic_to_xfa.get(k, k): v for k, v in data.items()}
+            # Translate semantic keys → XFA names. Build BOTH the bare
+            # name ("NAME") and the array-indexed name ("NAME[0]")
+            # because Aspose's AcroForm path emits SOM-style names.
+            xfa_data: dict[str, str] = {}
+            for k, v in data.items():
+                xfa_name = semantic_to_xfa.get(k, k)
+                xfa_data[xfa_name] = str(v) if v is not None else ""
+                xfa_data[f"{xfa_name}[0]"] = str(v) if v is not None else ""
 
-            # Some XFA forms only expose AcroForm fields once we flip the
-            # type. Try to set values via the XFA model first, fall back
-            # to AcroForm field-fill if that fails.
             n = 0
+
+            # XFA-model fill. Try the bare name AND a few common SOM paths
+            # so we cover Adobe LiveCycle's various authoring conventions.
             if doc.form.has_xfa:
                 try:
                     doc.form.ignore_needs_rendering = True
                 except Exception:
                     pass
                 xfa = doc.form.xfa
-                for name, value in xfa_data.items():
-                    if not value:
-                        continue
-                    try:
-                        xfa.set_field_value(name, str(value))
-                        n += 1
-                    except Exception:
-                        pass
+                base_data = {k: v for k, v in data.items() if v}
+                for sem_key, value in base_data.items():
+                    xfa_name = semantic_to_xfa.get(sem_key, sem_key)
+                    candidates = [
+                        xfa_name,
+                        f"form1.{xfa_name}",
+                        f"form1.Page1.{xfa_name}",
+                        f"topmostSubform.Page1.{xfa_name}",
+                        f"form1[0].Page1[0].{xfa_name}[0]",
+                    ]
+                    for path in candidates:
+                        try:
+                            xfa.set_field_value(path, str(value))
+                            n += 1
+                            break
+                        except Exception:
+                            continue
 
             # Convert dynamic XFA → static AcroForm so the output renders
             # in non-Adobe viewers.
@@ -472,17 +487,40 @@ def _try_aspose_fill(template: Path, data: dict, out: Path,
             except Exception as e:
                 log.warning(f"aspose: form.type=STANDARD failed: {e}")
 
-            # If the XFA path didn't bind anything, try AcroForm fields.
-            if n == 0:
-                for fld in doc.form.fields:
-                    fname = getattr(fld, "full_name", None) or getattr(fld, "partial_name", "")
-                    base = fname.split(".")[-1] if fname else ""
-                    if base in xfa_data and xfa_data[base]:
+            # AcroForm pass — runs ALWAYS now (not just when XFA fill
+            # gave 0), because Aspose sometimes silently no-ops the XFA
+            # fill but still emits the static AcroForm with empty fields.
+            # Match field by the LAST segment of full_name, with [N]
+            # suffix stripped.
+            for fld in doc.form.fields:
+                full = ""
+                try:
+                    full = fld.full_name or ""
+                except Exception:
+                    pass
+                if not full:
+                    try:
+                        full = fld.partial_name or ""
+                    except Exception:
+                        pass
+                if not full:
+                    continue
+                # Build candidate base names in priority order
+                last = full.split(".")[-1]
+                last_no_idx = re.sub(r"\[\d+\]$", "", last)
+                candidates = [
+                    full,            # exact full SOM path
+                    last,            # last segment as-is ("NAME[0]")
+                    last_no_idx,     # last segment, stripped ("NAME")
+                ]
+                for cand in candidates:
+                    if cand in xfa_data and xfa_data[cand]:
                         try:
-                            fld.value = str(xfa_data[base])
+                            fld.value = xfa_data[cand]
                             n += 1
+                            break
                         except Exception:
-                            pass
+                            continue
 
             doc.save(str(out))
             log.info(f"aspose: filled {n} field(s) → {out.name}")

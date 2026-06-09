@@ -6,7 +6,7 @@
 
 ## 0:00 — 0:30 · The hook
 
-> "Army company leaders work **twelve-and-a-half hour days** — longer than ninety-six percent of all American workers — and **less than a third** of that time is on actual readiness."
+> "Army company leaders work 12 ad 1/2 hour days — longer than 96% of all American workers — and **less than a third** of that time is on actual readiness."
 >
 > "Why? Because Modern War Institute — West Point's own think tank — documents that companies submit **three to four dozen reports a month**."
 >

@@ -536,9 +536,6 @@ function handleEvent(ev) {
       setState("speaking_user");
       transcriptEl.textContent = "(hearing you…)";
       break;
-    case "USER_DONE":
-      setState("thinking");
-      break;
     case "USER_SILENT":
       setState("listening");
       transcriptEl.textContent = "Didn't catch that — try again.";
@@ -546,13 +543,27 @@ function handleEvent(ev) {
     case "TRANSCRIPT":
       transcriptEl.textContent = `You: "${ev.text}"`;
       break;
-    case "BOT_SPEAKING_START":
-      setState("speaking");
-      replyEl.hidden = false;
+    case "USER_DONE":
+      // NEW TURN: clear the previous turn's bot summary and form
+      // iframe so the next reply renders cleanly. Was previously done
+      // inside BOT_SPEAKING_START — moved here so a follow-up bot
+      // turn (e.g. _speak_inline acknowledging an extracted field)
+      // doesn't wipe the PDF iframe that PDF_READY just rendered.
       spokenEl.textContent = "";
       formSection.hidden = true;
       formSection.innerHTML = "";
-      renderCitations(ev.citations || []);
+      renderCitations([]);
+      setState("thinking");
+      break;
+    case "BOT_SPEAKING_START":
+      setState("speaking");
+      replyEl.hidden = false;
+      // Only refresh citations if this event carries them. Empty
+      // citations on a follow-up speak event would erase the panel
+      // that PDF_READY / the prior turn just populated.
+      if (ev.citations && ev.citations.length) {
+        renderCitations(ev.citations);
+      }
       break;
     case "BOT_SPEAKING_END":
       spokenEl.textContent = ev.spoken_summary || "";
@@ -613,9 +624,24 @@ function renderPdf(ev) {
     <h4>${ev.form_id}</h4>
     <p class="form-meta">Filled${missingTxt}</p>
     <iframe class="form-pdf" src="${ev.pdf_url}" title="${ev.form_id} preview"></iframe>
-    <a class="form-download" href="${ev.pdf_url}" download>Download ${ev.form_id}</a>
+    <div class="form-actions">
+      <a class="form-download" href="${ev.pdf_url}" target="_blank" rel="noopener">Open preview in new tab ↗</a>
+      <a class="form-download" href="${ev.pdf_url}" download>Download ${ev.form_id}</a>
+    </div>
   `;
   formSection.appendChild(block);
+  // Auto-pop the filled PDF in a new tab. May be blocked by the popup
+  // policy on some browsers since the call originates from a WebSocket
+  // event (not a user-gesture click) — the "Open preview in new tab"
+  // link is the always-clickable fallback right above.
+  try {
+    const popup = window.open(ev.pdf_url, "_blank", "noopener");
+    if (!popup) {
+      console.info("auto-popup blocked — soldier can click the preview link");
+    }
+  } catch (err) {
+    console.info("window.open threw — soldier can click the preview link", err);
+  }
 }
 
 // ---------------------------------------------------------------------------

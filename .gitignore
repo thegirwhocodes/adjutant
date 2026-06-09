@@ -54,3 +54,7 @@ filled_forms/
 # Logs
 *.log
 logs/
+
+# VoiceMode per-project voice (local, not shared)
+.voicemode.env
+*.bak
